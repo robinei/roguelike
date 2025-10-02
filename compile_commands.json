@@ -1,0 +1,34 @@
+[
+  {
+    "arguments": [
+      "/usr/bin/clang",
+      "-std=c99",
+      "-Wall",
+      "-Wextra",
+      "-g",
+      "-c",
+      "-o",
+      "build/main.o",
+      "main.c"
+    ],
+    "directory": "/home/robin/Code/roguelike",
+    "file": "/home/robin/Code/roguelike/main.c",
+    "output": "/home/robin/Code/roguelike/build/main.o"
+  },
+  {
+    "arguments": [
+      "/usr/bin/clang",
+      "-std=c99",
+      "-Wall",
+      "-Wextra",
+      "-g",
+      "-c",
+      "-o",
+      "build/world/world.o",
+      "world/world.c"
+    ],
+    "directory": "/home/robin/Code/roguelike",
+    "file": "/home/robin/Code/roguelike/world/world.c",
+    "output": "/home/robin/Code/roguelike/build/world/world.o"
+  }
+]

@@ -17,9 +17,9 @@ This is a sparse array-based ECS that prioritizes simplicity and performance ove
 ## Key Features
 
 ### Entity Management
-- **Generational handles** - `EntityHandle` prevents use-after-free bugs
+- **Generational handles** - `Entity` prevents use-after-free bugs
 - **Entity freelist** - reuses entity slots to keep indices dense
-- **Safe handle validation** - `unwrap_handle()` checks generation and bounds
+- **Safe handle validation** - `entity_to_index()` checks generation and bounds
 
 ### Component System
 - **Bitset queries** - efficient iteration over entities with specific components
@@ -29,7 +29,7 @@ This is a sparse array-based ECS that prioritizes simplicity and performance ove
 
 ### Query Interface
 ```c
-ITER_QUERY(entity_id, (position, health)) {
+world_query(entity_id, (position, health)) {
     // Iterate over all entities with both position and health components
     uint16_t x = world.position[entity_id].x;
     uint16_t hp = world.health[entity_id].curr_health;
@@ -38,11 +38,11 @@ ITER_QUERY(entity_id, (position, health)) {
 
 ### Component Management
 ```c
-EntityHandle player = allocate_entity();
-ADD_COMPONENT(player, position, (Position){10, 20});
-ADD_COMPONENT(player, health, (Health){100, 100});
-REMOVE_COMPONENT(player, health);
-free_entity(player);
+Entity player = entity_alloc();
+entity_add_component(player, position, (Position){10, 20});
+entity_add_component(player, health, (Health){100, 100});
+entity_remove_component(player, health);
+entity_free(player);
 ```
 
 ## Memory Layout
@@ -68,7 +68,7 @@ For a roguelike with ~1000 entities and ~10 component types:
 - Only scans words up to `entity_count / 64` for efficiency
 
 ### Macro System
-- **ITER_QUERY**: Two nested `for` loops with entity ID calculation
+- **world_query**: Two nested `for` loops with entity ID calculation
 - **X-macros**: `FOREACH_COMPONENT(X)` generates struct fields and cleanup code
 - **Component dispatch**: Handles 1-5 components with same interface
 
@@ -82,33 +82,33 @@ For a roguelike with ~1000 entities and ~10 component types:
 
 ```c
 // Allocate entities
-EntityHandle player = allocate_entity();
-EntityHandle enemy = allocate_entity();
+Entity player = entity_alloc();
+Entity enemy = entity_alloc();
 
 // Add components
-ADD_COMPONENT(player, position, (Position){0, 0});
-ADD_COMPONENT(player, health, (Health){100, 100});
-ADD_COMPONENT(enemy, position, (Position){10, 10});
-ADD_COMPONENT(enemy, health, (Health){50, 50});
+entity_add_component(player, position, (Position){0, 0});
+entity_add_component(player, health, (Health){100, 100});
+entity_add_component(enemy, position, (Position){10, 10});
+entity_add_component(enemy, health, (Health){50, 50});
 
 // System: move all entities with position
-ITER_QUERY(i, (position)) {
+world_query(i, (position)) {
     world.position[i].x += 1;
 }
 
 // System: damage entities with health
-ITER_QUERY(i, (health)) {
+world_query(i, (health)) {
     if (world.health[i].curr_health > 0) {
         world.health[i].curr_health -= 10;
     }
 }
 
 // Query entities with multiple components
-ITER_QUERY(i, (position, health)) {
+world_query(i, (position, health)) {
     // Handle entities that have both components
     if (world.health[i].curr_health <= 0) {
-        EntityHandle handle = make_handle(i);
-        REMOVE_COMPONENT(handle, health); // Entity "dies"
+        Entity handle = entity_from_index(i);
+        entity_remove_component(handle, health); // Entity "dies"
     }
 }
 ```
