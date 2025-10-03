@@ -3,23 +3,22 @@
 // declare global WorldState
 WorldState world;
 
-void entityset_add(EntitySet *set, Entity handle) {
-  uint32_t index = entity_to_index(handle);
-  if (bitset_test(set->bitvec, index)) {
+void entityset_add(EntitySet *set, EntityIndex index) {
+  if (bitset_test(set->bitset, index)) {
     return;
   }
-  bitset_set(set->bitvec, index);
-  set->entities[set->count++] = handle;
+  bitset_set(set->bitset, index);
+  set->entities[set->count++] = index;
 }
 
 #define MAX_DEPTH 100
 
-void entityset_expand_children(EntitySet *set) {
+void entityset_expand_descendants(EntitySet *set) {
   // Track visited entities to avoid redundant parent chain walks
-  uint64_t visited[BITVEC_WORDS];
+  uint64_t visited[BITSET_WORDS];
 
   // Pre-populate visited with entities already in the set
-  bitset_copy(visited, set->bitvec);
+  bitset_copy(visited, set->bitset);
 
   // Scan all entities with parent component
   world_query(i, INC(parent)) {
@@ -33,14 +32,12 @@ void entityset_expand_children(EntitySet *set) {
     path[path_len++] = i;
     bitset_set(visited, i);
 
-    Entity current = world.parent[i];
+    EntityIndex current_idx = world.parent[i];
     bool found = false;
 
     for (int depth = 0; depth < MAX_DEPTH; depth++) {
-      uint32_t current_idx = entity_to_index(current);
-
       // Check if this ancestor is in the set
-      if (bitset_test(set->bitvec, current_idx)) {
+      if (bitset_test(set->bitset, current_idx)) {
         found = true;
         break;
       }
@@ -54,15 +51,15 @@ void entityset_expand_children(EntitySet *set) {
       path[path_len++] = current_idx;
       bitset_set(visited, current_idx);
 
-      if (!entity_has_component(current, parent))
+      if (!entity_has(current_idx, parent))
         break;
-      current = world.parent[current_idx];
+      current_idx = world.parent[current_idx];
     }
 
     // Add the entire path to set if found
     if (found) {
       for (uint32_t j = 0; j < path_len; j++) {
-        entityset_add(set, entity_from_index(path[j]));
+        entityset_add(set, path[j]);
       }
     }
   }
@@ -72,11 +69,11 @@ void entityset_expand_children(EntitySet *set) {
 #define DO_CLEAR_MARKER_BIT(name) CLEAR_COMPONENT_BIT(index, name);
 
 void entityset_free(EntitySet *to_free) {
-  entityset_expand_children(to_free);
+  entityset_expand_descendants(to_free);
 
   // Free all collected entities
   for (uint32_t i = 0; i < to_free->count; i++) {
-    uint32_t index = entity_to_index(to_free->entities[i]);
+    EntityIndex index = to_free->entities[i];
 
     FOREACH_COMPONENT(DO_CLEAR_COMPONENT_BIT)
     FOREACH_MARKER(DO_CLEAR_MARKER_BIT)
@@ -92,15 +89,15 @@ void entityset_free(EntitySet *to_free) {
   }
 }
 
-Entity entity_alloc(void) {
+EntityIndex entity_alloc(void) {
   if (world.freelist_count > 0) {
-    return entity_from_index(world.freelist[--world.freelist_count]);
+    return world.freelist[--world.freelist_count];
   }
   assert(world.entity_count < MAX_ENTITIES);
-  return entity_from_index(world.entity_count++);
+  return world.entity_count++;
 }
 
-void entity_free(Entity handle) {
+void entity_free(EntityIndex handle) {
   EntitySet to_free = {0};
   entityset_add(&to_free, handle);
   entityset_free(&to_free);

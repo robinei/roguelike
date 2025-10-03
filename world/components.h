@@ -4,11 +4,6 @@
 #include <stdint.h>
 
 typedef struct {
-  uint32_t _generation : 16;
-  uint32_t _index : 16;
-} Entity;
-
-typedef struct {
   uint16_t x;
   uint16_t y;
 } Position;
@@ -37,7 +32,7 @@ typedef struct {
   X(Position, position)                                                        \
   X(Health, health)                                                            \
   X(BodyPart, body_part)                                                       \
-  X(Entity, parent)
+  X(EntityIndex, parent)
 
 #define FOREACH_MARKER(X)                                                      \
   X(is_equipped)                                                               \
