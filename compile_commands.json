@@ -8,12 +8,12 @@
       "-g",
       "-c",
       "-o",
-      "build/main.o",
-      "main.c"
+      "build/src/world.o",
+      "src/world.c"
     ],
     "directory": "/home/robin/Code/roguelike",
-    "file": "/home/robin/Code/roguelike/main.c",
-    "output": "/home/robin/Code/roguelike/build/main.o"
+    "file": "/home/robin/Code/roguelike/src/world.c",
+    "output": "/home/robin/Code/roguelike/build/src/world.o"
   },
   {
     "arguments": [
@@ -24,11 +24,27 @@
       "-g",
       "-c",
       "-o",
-      "build/world/world.o",
-      "world/world.c"
+      "build/src/particles.o",
+      "src/particles.c"
     ],
     "directory": "/home/robin/Code/roguelike",
-    "file": "/home/robin/Code/roguelike/world/world.c",
-    "output": "/home/robin/Code/roguelike/build/world/world.o"
+    "file": "/home/robin/Code/roguelike/src/particles.c",
+    "output": "/home/robin/Code/roguelike/build/src/particles.o"
+  },
+  {
+    "arguments": [
+      "/usr/bin/clang",
+      "-std=c99",
+      "-Wall",
+      "-Wextra",
+      "-g",
+      "-c",
+      "-o",
+      "build/src/main.o",
+      "src/main.c"
+    ],
+    "directory": "/home/robin/Code/roguelike",
+    "file": "/home/robin/Code/roguelike/src/main.c",
+    "output": "/home/robin/Code/roguelike/build/src/main.o"
   }
 ]

@@ -1,8 +1,8 @@
 #include "particles.h"
+#include "splitmix64.h"
 #include <assert.h>
 #include <math.h>
 #include <stdint.h>
-#include <stdlib.h>
 
 #define MAX_PARTICLES 1024
 #define PI 3.14159265f
@@ -10,9 +10,13 @@
 static uint32_t particle_count = 0;
 static Particle particles[MAX_PARTICLES];
 
-// Simple random float between min and max
 static float randf(float min, float max) {
-  return min + (max - min) * ((float)rand() / (float)RAND_MAX);
+  return min + (max - min) * splitmix64_nextf();
+}
+
+static int randi(int min, int max) {
+  // Random integer in [min, max] (inclusive)
+  return min + (int)(splitmix64_next() % (uint64_t)(max - min + 1));
 }
 
 // Get type-specific TTL (correlated with expected travel distance)
@@ -32,6 +36,26 @@ static float get_ttl(ParticleType type) {
     return 0.3f; // ~1 tile with parabolic arc
   }
   return 1.0f;
+}
+
+// Returns spawn interval in ticks (1 tick = 0.1 seconds)
+// Result fits in uint8_t (max 255 ticks = 25.5 seconds)
+int particles_gen_spawn_interval(ParticleType type) {
+  switch (type) {
+  case PARTICLE_TYPE_BLOOD:
+    return 0; // Not a continuous generator (spawned on events)
+  case PARTICLE_TYPE_FOG:
+    return randi(8, 12); // Sparse fog every ~1 second
+  case PARTICLE_TYPE_SNOW:
+    return randi(1, 3); // Frequent snowflakes
+  case PARTICLE_TYPE_RAIN:
+    return randi(1, 2); // Very frequent raindrops (0.1-0.2s)
+  case PARTICLE_TYPE_TORCH_SMOKE:
+    return randi(2, 4); // Smoke puffs every ~0.3 seconds
+  case PARTICLE_TYPE_TORCH_SPARK:
+    return randi(5, 10); // Occasional sparks every ~0.75 seconds
+  }
+  return 10; // Default: once per second
 }
 
 void particles_spawn_directed(ParticleType type, float x, float y, float dx,

@@ -1,5 +1,6 @@
 CC = clang
 CFLAGS = -std=c99 -Wall -Wextra -g -MMD -MP
+LDFLAGS = -lm
 BUILDDIR = build
 TARGET = $(BUILDDIR)/roguelike
 
@@ -8,7 +9,7 @@ OBJS = $(SRCS:./%.c=$(BUILDDIR)/%.o)
 DEPS = $(SRCS:./%.c=$(BUILDDIR)/%.d)
 
 $(TARGET): $(OBJS) | $(BUILDDIR)
-	$(CC) $(OBJS) -o $(TARGET)
+	$(CC) $(LDFLAGS) $(OBJS) -o $(TARGET)
 
 $(BUILDDIR)/%.o: ./%.c | $(BUILDDIR)
 	@mkdir -p $(dir $@)

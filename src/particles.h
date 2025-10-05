@@ -26,3 +26,5 @@ void particles_spawn_directed(ParticleType type, float x, float y, float dx,
                               float dy);
 
 void particles_update(float dt);
+
+int particles_gen_spawn_interval(ParticleType type);

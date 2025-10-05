@@ -1,7 +1,31 @@
 #include "world.h"
+#include <stdarg.h>
+#include <stdio.h>
 
 // declare global WorldState
 WorldState world;
+
+void output_message(const char *fmt, ...) {
+  va_list args;
+  va_start(args, fmt);
+
+  // If buffer is full, drop oldest message
+  if (world.messages_count == MESSAGE_COUNT_MAX) {
+    world.messages_first = (world.messages_first + 1) % MESSAGE_COUNT_MAX;
+  } else {
+    world.messages_count++;
+  }
+
+  // Format message at next position
+  uint32_t pos = (world.messages_first + world.messages_count - 1) % MESSAGE_COUNT_MAX;
+  Message *msg = &world.messages[pos];
+  msg->length = vsnprintf(msg->text, MESSAGE_LENGTH_MAX + 1, fmt, args);
+  if (msg->length > MESSAGE_LENGTH_MAX) {
+    msg->length = MESSAGE_LENGTH_MAX;
+  }
+
+  va_end(args);
+}
 
 void entityset_add(EntitySet *set, EntityIndex index) {
   if (bitset_test(set->bitset, index)) {
@@ -21,7 +45,7 @@ void entityset_expand_descendants(EntitySet *set) {
   bitset_copy(visited, set->bitset);
 
   // Scan all entities with parent component
-  world_query(i, INC(parent)) {
+  world_query(i, BITS(parent)) {
     // Skip if already visited
     if (bitset_test(visited, i))
       continue;
@@ -97,8 +121,12 @@ EntityIndex entity_alloc(void) {
   return world.entity_count++;
 }
 
-void entity_free(EntityIndex handle) {
+void entity_free(EntityIndex index) {
   EntitySet to_free = {0};
-  entityset_add(&to_free, handle);
+  entityset_add(&to_free, index);
   entityset_free(&to_free);
+}
+
+bool entity_is_player(EntityIndex index) {
+  return entity_handle_to_index(world.player) == index;
 }

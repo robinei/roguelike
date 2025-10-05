@@ -60,17 +60,10 @@ static inline void bitset_copy(uint64_t *dst, const uint64_t *src) {
     memset(&world.comp[index], 0, sizeof(world.comp[index]));                  \
   } while (0)
 
-#define entity_mark(entity_idx, marker)                                        \
-  do {                                                                         \
-    uint32_t index = entity_idx;                                               \
-    SET_COMPONENT_BIT(index, marker);                                          \
-  } while (0)
+#define entity_mark(entity_idx, marker) SET_COMPONENT_BIT(entity_idx, marker);
 
 #define entity_unmark(entity_idx, marker)                                      \
-  do {                                                                         \
-    uint32_t index = entity_idx;                                               \
-    CLEAR_COMPONENT_BIT(index, marker);                                        \
-  } while (0)
+  CLEAR_COMPONENT_BIT(entity_idx, marker)
 
 // ============================================================================
 // Map
@@ -86,8 +79,27 @@ typedef struct {
 } Map;
 
 // ============================================================================
+// Visible message log
+// ============================================================================
+
+#define MESSAGE_LENGTH_MAX 511
+#define MESSAGE_COUNT_MAX 100
+
+typedef struct {
+  int length;
+  char text[MESSAGE_LENGTH_MAX + 1];
+} Message;
+
+void output_message(const char *fmt, ...);
+
+// ============================================================================
 // World state
 // ============================================================================
+
+typedef struct {
+  uint32_t _generation : 16;
+  uint32_t _index : 16;
+} EntityHandle;
 
 #define DO_DECLARE_COMPONENT(type, name)                                       \
   uint64_t name##_bitset[BITSET_WORDS];                                        \
@@ -106,30 +118,58 @@ typedef struct {
   FOREACH_COMPONENT(DO_DECLARE_COMPONENT)
   FOREACH_MARKER(DO_DECLARE_MARKER)
 
+  Message messages[MESSAGE_COUNT_MAX];
+  uint32_t messages_count;
+  uint32_t messages_first;
+
+  EntityHandle player;
   Map map;
 } WorldState;
 
 extern WorldState world;
 
-#define INC(comp) world.comp##_bitset[_word_idx] &
-#define EXC(comp) ~world.comp##_bitset[_word_idx] &
-
-// query all world entities using INC and EXC with component names
+// query all world entities using BITS with component names to form a bitwise
+// expression on bitset words
+// example: world_query(i, BITS(position) & ~BITS(is_dead))
 #define world_query(index_var, ...)                                            \
   for (uint32_t index_var, _word_idx = 0,                                      \
                            _word_idx_max = world.entity_count / 64;            \
        _word_idx <= _word_idx_max; _word_idx++)                                \
-    for (uint64_t _word = (__VA_ARGS__ ~0ULL);                                 \
+    for (uint64_t _word = __VA_ARGS__;                                         \
          _word && (index_var = _word_idx * 64 + __builtin_ctzll(_word), 1);    \
          _word &= _word - 1)
 
+#define BITS(comp) world.comp##_bitset[_word_idx]
+
 // ============================================================================
-// EntityHandle set
+// EntityHandle
+// ============================================================================
+
+static inline EntityIndex entity_handle_to_index(EntityHandle handle) {
+  assert(handle._index < world.entity_count);
+  assert(world.generation[handle._index] == handle._generation);
+  return handle._index;
+}
+
+static inline EntityHandle entity_handle_from_index(EntityIndex index) {
+  assert(index < world.entity_count);
+  return (EntityHandle){world.generation[index], index};
+}
+
+static inline bool entity_handle_equals(EntityHandle a, EntityHandle b) {
+  return *(uint32_t *)&a == *(uint32_t *)&b;
+}
+
+// ============================================================================
+// EntitySet
 // ============================================================================
 
 typedef struct {
-  uint32_t count;                // number of added entities
-  uint64_t bitset[BITSET_WORDS]; // purely for tracking membership in the set
+  // stores added entities both by setting their bit in the bit set, and by
+  // adding the index to the entities array. the redundancy makes both testing
+  // membership and iterating fast
+  uint32_t count;
+  uint64_t bitset[BITSET_WORDS];
   EntityIndex entities[MAX_ENTITIES];
 } EntitySet;
 
@@ -143,42 +183,22 @@ void entityset_expand_descendants(EntitySet *set);
 // and freed too
 void entityset_free(EntitySet *to_free);
 
-#define HAS(comp) bitset_test(world.comp##_bitset, _entity_idx) &&
-#define NOT(comp) (!bitset_test(world.comp##_bitset, _entity_idx)) &&
-
-// query the entities in the EntitySet using HAS and NOT with component names
+// query the entities in the EntitySet using HAS with component names
+// example: entityset_query(i, &set, HAS(position) && !HAS(is_dead))
 #define entityset_query(index_var, set, ...)                                   \
-  for (uint32_t _i = 0, index_var;                                             \
-       _i < (set)->count && (index_var = (set)->entities[_i], 1); _i++)        \
-    if (__VA_ARGS__ 1)
+  for (uint32_t _i = 0, index_var, _entity_idx;                                \
+       _i < (set)->count &&                                                    \
+       (index_var = _entity_idx = (set)->entities[_i], 1);                     \
+       _i++)                                                                   \
+    if (__VA_ARGS__)
+
+#define HAS(comp) entity_has(_entity_idx, comp)
 
 // ============================================================================
-// EntityHandle
-// ============================================================================
-
-typedef struct {
-  uint32_t _generation : 16;
-  uint32_t _index : 16;
-} EntityHandle;
-
-static inline EntityIndex entity_handle_to_index(EntityHandle handle) {
-  assert(handle._index < world.entity_count);
-  assert(world.generation[handle._index] == handle._generation);
-  return handle._index;
-}
-
-static inline EntityHandle entity_handle_from_index(EntityIndex index) {
-  assert(index < world.entity_count);
-  return (EntityHandle){world.generation[index], index};
-}
-
-static inline bool entity_equals(EntityHandle a, EntityHandle b) {
-  return *(uint32_t *)&a == *(uint32_t *)&b;
-}
-
-// ============================================================================
-// Entity alloc / free
+// Entity alloc / free and utils
 // ============================================================================
 
 EntityIndex entity_alloc(void);
-void entity_free(EntityIndex handle);
+void entity_free(EntityIndex index);
+
+bool entity_is_player(EntityIndex index);

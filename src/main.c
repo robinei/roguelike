@@ -1,10 +1,10 @@
-#include "world/world.h"
+#include "world.h"
 #include <stdio.h>
 
 static EntityIndex spawn_player(int x, int y) {
   EntityIndex handle = entity_alloc();
   entity_add(handle, position, ((Position){x, y}));
-  entity_add(handle, health, ((Health){100, 100}));
+  entity_add(handle, health, HEALTH_FULL);
   return handle;
 }
 
@@ -34,7 +34,7 @@ static void equip(EntityIndex actor, EntityIndex what) {
 
 static int query_inventory(EntityIndex entity, EntityIndex *inv, int inv_max) {
   int count = 0;
-  world_query(i, INC(parent) INC(is_inventory)) {
+  world_query(i, BITS(parent) & BITS(is_inventory)) {
     if (entity == world.parent[i]) {
       assert(count < inv_max);
       inv[count++] = i;
@@ -44,6 +44,9 @@ static int query_inventory(EntityIndex entity, EntityIndex *inv, int inv_max) {
 }
 
 int main() {
+  // entity at index 0 should not be used (index 0 should mean "no entity")
+  entity_alloc();
+
   EntityIndex player = spawn_player(0, 0);
 
   EntityIndex corpse = entity_alloc();
@@ -52,15 +55,15 @@ int main() {
 
   // Test: entities with position, excluding equipped items
   printf("Non-equipped positioned entities:\n");
-  world_query(i, INC(position) EXC(is_dead)) {
+  world_query(i, BITS(position) & ~BITS(is_dead)) {
     printf("  entity %u at (%u, %u)\n", i, world.position[i].x,
            world.position[i].y);
   }
 
   // Test: multiple includes
-  world_query(i, INC(position) INC(health)) {
+  world_query(i, BITS(position) & BITS(health)) {
     printf("  Living at (%u, %u) with %u HP\n", world.position[i].x,
-           world.position[i].y, world.health[i].curr_health);
+           world.position[i].y, world.health[i]);
   }
 
   return 0;
