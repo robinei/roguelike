@@ -2,23 +2,24 @@
 #include <stdarg.h>
 #include <stdio.h>
 
-// declare global WorldState
-WorldState world;
+// declare global WorldState pointer
+WorldState *active_world;
 
 void output_message(const char *fmt, ...) {
   va_list args;
   va_start(args, fmt);
 
   // If buffer is full, drop oldest message
-  if (world.messages_count == MESSAGE_COUNT_MAX) {
-    world.messages_first = (world.messages_first + 1) % MESSAGE_COUNT_MAX;
+  if (WORLD.messages_count == MESSAGE_COUNT_MAX) {
+    WORLD.messages_first = (WORLD.messages_first + 1) % MESSAGE_COUNT_MAX;
   } else {
-    world.messages_count++;
+    WORLD.messages_count++;
   }
 
   // Format message at next position
-  uint32_t pos = (world.messages_first + world.messages_count - 1) % MESSAGE_COUNT_MAX;
-  Message *msg = &world.messages[pos];
+  uint32_t pos =
+      (WORLD.messages_first + WORLD.messages_count - 1) % MESSAGE_COUNT_MAX;
+  Message *msg = &WORLD.messages[pos];
   msg->length = vsnprintf(msg->text, MESSAGE_LENGTH_MAX + 1, fmt, args);
   if (msg->length > MESSAGE_LENGTH_MAX) {
     msg->length = MESSAGE_LENGTH_MAX;
@@ -56,7 +57,7 @@ void entityset_expand_descendants(EntitySet *set) {
     path[path_len++] = i;
     bitset_set(visited, i);
 
-    EntityIndex current_idx = world.parent[i];
+    EntityIndex current_idx = WORLD.parent[i];
     bool found = false;
 
     for (int depth = 0; depth < MAX_DEPTH; depth++) {
@@ -77,7 +78,7 @@ void entityset_expand_descendants(EntitySet *set) {
 
       if (!entity_has(current_idx, parent))
         break;
-      current_idx = world.parent[current_idx];
+      current_idx = WORLD.parent[current_idx];
     }
 
     // Add the entire path to set if found
@@ -99,26 +100,31 @@ void entityset_free(EntitySet *to_free) {
   for (uint32_t i = 0; i < to_free->count; i++) {
     EntityIndex index = to_free->entities[i];
 
+    // Remove from turn queue if present
+    if (entity_has(index, turn_schedule)) {
+      turn_queue_remove(index);
+    }
+
     FOREACH_COMPONENT(DO_CLEAR_COMPONENT_BIT)
     FOREACH_MARKER(DO_CLEAR_MARKER_BIT)
 
     // Increment generation to invalidate the freed handle
     // Only return to freelist if generation hasn't maxed out
-    if (world.generation[index] < UINT16_MAX) {
-      world.generation[index]++;
-      assert(world.freelist_count < MAX_ENTITIES);
-      world.freelist[world.freelist_count++] = index;
+    if (WORLD.generation[index] < UINT16_MAX) {
+      WORLD.generation[index]++;
+      assert(WORLD.freelist_count < MAX_ENTITIES);
+      WORLD.freelist[WORLD.freelist_count++] = index;
     }
     // else: slot permanently retired at max generation
   }
 }
 
 EntityIndex entity_alloc(void) {
-  if (world.freelist_count > 0) {
-    return world.freelist[--world.freelist_count];
+  if (WORLD.freelist_count > 0) {
+    return WORLD.freelist[--WORLD.freelist_count];
   }
-  assert(world.entity_count < MAX_ENTITIES);
-  return world.entity_count++;
+  assert(WORLD.entity_count < MAX_ENTITIES);
+  return WORLD.entity_count++;
 }
 
 void entity_free(EntityIndex index) {
@@ -128,5 +134,29 @@ void entity_free(EntityIndex index) {
 }
 
 bool entity_is_player(EntityIndex index) {
-  return entity_handle_to_index(world.player) == index;
+  return entity_handle_to_index(WORLD.player) == index;
+}
+
+EntityIndex get_position_ancestor(EntityIndex entity) {
+  for (;;) {
+    if (entity_has(entity, position)) {
+      return entity;
+    }
+    if (!entity_has(entity, parent)) {
+      return 0;
+    }
+    entity = WORLD.parent[entity];
+  }
+}
+
+EntityIndex get_attributes_ancestor(EntityIndex entity) {
+  for (;;) {
+    if (entity_has(entity, attributes)) {
+      return entity;
+    }
+    if (!entity_has(entity, parent)) {
+      return 0;
+    }
+    entity = WORLD.parent[entity];
+  }
 }
