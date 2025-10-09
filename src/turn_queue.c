@@ -23,7 +23,9 @@ static inline void turn_queue_swap(uint16_t i, uint16_t j) {
 static inline int turn_queue_compare(uint16_t a, uint16_t b) {
   EntityIndex idx_a = entity_handle_to_index(WORLD.turn_queue.entities[a]);
   EntityIndex idx_b = entity_handle_to_index(WORLD.turn_queue.entities[b]);
-  return WORLD.turn_schedule[idx_a].delay - WORLD.turn_schedule[idx_b].delay;
+  int diff =
+      WORLD.turn_schedule[idx_a].delay - WORLD.turn_schedule[idx_b].delay;
+  return diff ? diff : idx_a - idx_b;
 }
 
 static void turn_queue_sift_up(uint16_t heap_index) {

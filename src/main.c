@@ -84,6 +84,8 @@ static bool init_renderer(Renderer *r) {
   }
 
   SDL_SetRenderVSync(r->renderer, 1); // Enable VSync
+  SDL_SetRenderDrawBlendMode(r->renderer,
+                             SDL_BLENDMODE_BLEND); // Enable alpha blending
 
   // Load tileset with stb_image
   int channels;

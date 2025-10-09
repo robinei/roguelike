@@ -4,6 +4,7 @@
 #include "components.h"
 #include "particles.h"
 #include "render_api.h"
+#include "splitmix64.h"
 #include "turn_queue.h"
 #include "world.h"
 
@@ -35,6 +36,14 @@ static EntityIndex spawn_player(int x, int y) {
   return player;
 }
 
+static EntityIndex spawn_monster(int x, int y) {
+  EntityIndex player = entity_alloc();
+  entity_add(player, position, ((Position){x, y}));
+  entity_add(player, health, HEALTH_FULL);
+  turn_queue_insert(player, 0);
+  return player;
+}
+
 void game_init(WorldState *world) {
   active_world = world;
 
@@ -46,6 +55,10 @@ void game_init(WorldState *world) {
   turn_queue_insert(turn_index, TURN_INTERVAL);
 
   WORLD.player = entity_handle_from_index(spawn_player(0, 0));
+
+  spawn_monster(10, 10);
+  spawn_monster(15, 10);
+
   WORLD.map.width = 64;
   WORLD.map.height = 64;
 
@@ -75,9 +88,50 @@ void game_tick(WorldState *world, uint64_t tick) {
   particle_emit_system_tick();
 }
 
+static void process_turn_entity(void);
+static void process_npc_turn(EntityIndex entity);
+static int16_t execute_player_action(InputCommand command);
+
 void game_frame(WorldState *world, double dt) {
   active_world = world;
   particles_update(dt);
+
+  // Advance action animation
+  if (WORLD.anim.type != ACTION_ANIM_NONE) {
+    const double ANIM_DURATION = 0.15; // 150ms per action
+    WORLD.anim.progress += dt / ANIM_DURATION;
+
+    if (WORLD.anim.progress >= 1.0) {
+      // Animation complete, clear it
+      WORLD.anim.type = ACTION_ANIM_NONE;
+      WORLD.anim.progress = 0.0;
+    }
+  }
+
+  // If no animation playing, process the turn queue
+  // Don't start new animation same frame as completion to avoid snap
+  if (WORLD.anim.type == ACTION_ANIM_NONE && WORLD.turn_queue.count > 0) {
+    EntityHandle next = turn_queue_peek();
+
+    if (entity_handle_equals(next, WORLD.player)) {
+      // Player's turn - do we have input?
+      if (WORLD.next_player_input != INPUT_CMD_NONE) {
+        // Yes! Execute action, adjust queue position, clear input
+        int16_t action_cost = execute_player_action(WORLD.next_player_input);
+        EntityIndex player = entity_handle_to_index(WORLD.player);
+        turn_queue_add_delay(player, action_cost);
+        WORLD.next_player_input = INPUT_CMD_NONE;
+      }
+      // No input? Just wait (don't pop from queue)
+    } else if (entity_handle_equals(next, WORLD.turn_entity)) {
+      EntityIndex entity = entity_handle_to_index(WORLD.turn_entity);
+      turn_queue_add_delay(entity, TURN_INTERVAL);
+      process_turn_entity();
+    } else {
+      // NPC turn - will set anim if needed
+      process_npc_turn(entity_handle_to_index(next));
+    }
+  }
 }
 
 static void process_turn_entity(void) {
@@ -121,50 +175,16 @@ static int16_t execute_player_action(InputCommand command) {
 static void process_npc_turn(EntityIndex entity) {
   // TODO: AI logic for NPCs
   // For now, just wait
-  turn_queue_insert(entity, TURN_INTERVAL);
-}
+  action_move(entity, splitmix64_next() % 8);
 
-static void run_queue_until_player_turn(void) {
-  while (WORLD.turn_queue.count > 0) {
-    EntityHandle next = turn_queue_peek();
-
-    // If it's the player's turn, stop
-    if (entity_handle_equals(next, WORLD.player)) {
-      break;
-    }
-
-    // Pop and process the entity
-    EntityHandle h = turn_queue_pop();
-    EntityIndex entity = entity_handle_to_index(h);
-
-    if (entity_handle_equals(h, WORLD.turn_entity)) {
-      process_turn_entity();
-      turn_queue_insert(entity, TURN_INTERVAL);
-    } else {
-      // It's an NPC
-      process_npc_turn(entity);
-    }
-  }
+  turn_queue_add_delay(entity, TURN_INTERVAL);
 }
 
 void game_input(WorldState *world, InputCommand command) {
   active_world = world;
 
-  // 1. Run queue until it's the player's turn (safety check)
-  run_queue_until_player_turn();
-
-  // At this point, player should be at the front of the queue
-  EntityHandle next = turn_queue_peek();
-  assert(entity_handle_equals(next, WORLD.player));
-
-  // 2. Pop player, execute their action, and re-insert with action cost
-  turn_queue_pop();
-  int16_t action_cost = execute_player_action(command);
-  EntityIndex player = entity_handle_to_index(WORLD.player);
-  turn_queue_insert(player, action_cost);
-
-  // 3. Run queue until it's the player's turn again
-  run_queue_until_player_turn();
+  // Just record the input - game_frame will process it
+  WORLD.next_player_input = command;
 }
 
 void game_render(WorldState *world, PlatformContext *platform) {
@@ -175,100 +195,121 @@ void game_render(WorldState *world, PlatformContext *platform) {
 
   // Get player position for camera centering
   EntityIndex player_idx = entity_handle_to_index(world->player);
-  int camera_center_x = 0;
-  int camera_center_y = 0;
+  float camera_center_x = 0.0f;
+  float camera_center_y = 0.0f;
 
   if (entity_has(player_idx, position)) {
-    camera_center_x = world->position[player_idx].x;
-    camera_center_y = world->position[player_idx].y;
-  }
+    Position *pos = &world->position[player_idx];
+    camera_center_x = (float)pos->x;
+    camera_center_y = (float)pos->y;
 
-  // Calculate viewport dimensions in tiles
-  int viewport_tiles_x = platform->viewport_width_px / platform->tile_size;
-  int viewport_tiles_y = platform->viewport_height_px / platform->tile_size;
-
-  // Calculate top-left corner of viewport in world coordinates
-  int viewport_left = camera_center_x - viewport_tiles_x / 2;
-  int viewport_top = camera_center_y - viewport_tiles_y / 2;
-
-  // Draw visible tiles
-  for (int screen_y = 0; screen_y < viewport_tiles_y; screen_y++) {
-    for (int screen_x = 0; screen_x < viewport_tiles_x; screen_x++) {
-      int world_x = viewport_left + screen_x;
-      int world_y = viewport_top + screen_y;
-
-      // Check if tile is within map bounds
-      if (world_x < 0 || world_x >= (int)world->map.width || world_y < 0 ||
-          world_y >= (int)world->map.height) {
-        // Out of bounds - skip (background already cleared)
-        continue;
-      }
-
-      int tile = TILE_FLOOR;
-
-      // Draw checkerboard pattern as test
-      if ((world_x + world_y) % 2 == 0) {
-        tile = 0; // First tile
-      } else {
-        tile = 1; // Second tile
-      }
-
-      int px = screen_x * platform->tile_size;
-      int py = screen_y * platform->tile_size;
-      cmdbuf_tile(&cmd_buf, platform, ATLAS_TILES, tile, px, py,
-                  platform->tile_size, platform->tile_size);
+    // If player is animating, use interpolated position
+    if (WORLD.anim.type == ACTION_ANIM_MOVE &&
+        entity_handle_to_index(WORLD.anim.actor) == player_idx) {
+      float t = WORLD.anim.progress;
+      camera_center_x = WORLD.anim.move.from.x +
+                        (WORLD.anim.move.to.x - WORLD.anim.move.from.x) * t;
+      camera_center_y = WORLD.anim.move.from.y +
+                        (WORLD.anim.move.to.y - WORLD.anim.move.from.y) * t;
     }
   }
 
-  // Draw player at center of screen
-  if (entity_has(player_idx, position)) {
-    int player_screen_x = (viewport_tiles_x / 2) * platform->tile_size;
-    int player_screen_y = (viewport_tiles_y / 2) * platform->tile_size;
-    cmdbuf_tile(&cmd_buf, platform, ATLAS_TILES, TILE_PLAYER, player_screen_x,
-                player_screen_y, platform->tile_size, platform->tile_size);
+  // Calculate camera position in pixels (center on player's interpolated
+  // position)
+  float camera_center_px = camera_center_x * platform->tile_size;
+  float camera_center_py = camera_center_y * platform->tile_size;
+
+  // Calculate top-left corner of viewport in pixels
+  float viewport_left_px =
+      camera_center_px - platform->viewport_width_px / 2.0f;
+  float viewport_top_px =
+      camera_center_py - platform->viewport_height_px / 2.0f;
+
+  // Calculate top-left tile and pixel offset
+  int start_tile_x = (int)(viewport_left_px / platform->tile_size);
+  int start_tile_y = (int)(viewport_top_px / platform->tile_size);
+  int offset_x = (int)(viewport_left_px - start_tile_x * platform->tile_size);
+  int offset_y = (int)(viewport_top_px - start_tile_y * platform->tile_size);
+
+  // Draw visible tiles
+  int screen_y = -offset_y;
+  for (int tile_y = start_tile_y; screen_y < platform->viewport_height_px;
+       tile_y++) {
+    int screen_x = -offset_x;
+    for (int tile_x = start_tile_x; screen_x < platform->viewport_width_px;
+         tile_x++) {
+      // Check if tile is within map bounds
+      if (tile_x >= 0 && tile_x < (int)world->map.width && tile_y >= 0 &&
+          tile_y < (int)world->map.height) {
+
+        int tile = TILE_FLOOR;
+
+        // Draw checkerboard pattern as test
+        if ((tile_x + tile_y) % 2 == 0) {
+          tile = 0; // First tile
+        } else {
+          tile = 1; // Second tile
+        }
+
+        cmdbuf_tile(&cmd_buf, platform, ATLAS_TILES, tile, screen_x, screen_y,
+                    platform->tile_size, platform->tile_size);
+      }
+      screen_x += platform->tile_size;
+    }
+    screen_y += platform->tile_size;
   }
 
-  // Draw message log at bottom of screen
-  #define MESSAGE_DISPLAY_LINES 5
-  int message_viewport_tiles = MESSAGE_DISPLAY_LINES;
+  // Draw entities with position component
+  world_query(i, BITS(position)) {
+    Position *pos = &WORLD.position[i];
 
-  // Check if the bottom-most tile is partial (would cut off last message line)
-  bool bottom_tile_partial =
-      (platform->viewport_height_px % platform->tile_size) != 0;
+    // Start with entity's actual position (in tile coordinates)
+    float world_x = (float)pos->x;
+    float world_y = (float)pos->y;
 
-  // If bottom tile is partial, start messages one tile higher
-  int viewport_start_y = viewport_tiles_y - message_viewport_tiles;
-  if (bottom_tile_partial && viewport_start_y > 0) {
-    viewport_start_y--;
+    // If this entity is animating, interpolate between from and to positions
+    if (WORLD.anim.type == ACTION_ANIM_MOVE &&
+        entity_handle_to_index(WORLD.anim.actor) == i) {
+      float t = WORLD.anim.progress;
+      world_x = WORLD.anim.move.from.x +
+                (WORLD.anim.move.to.x - WORLD.anim.move.from.x) * t;
+      world_y = WORLD.anim.move.from.y +
+                (WORLD.anim.move.to.y - WORLD.anim.move.from.y) * t;
+    }
+
+    // Convert world position to pixels, then to screen coordinates
+    float world_px = world_x * platform->tile_size;
+    float world_py = world_y * platform->tile_size;
+    int screen_x = (int)(world_px - viewport_left_px);
+    int screen_y = (int)(world_py - viewport_top_px);
+
+    // For now, all entities are rendered as TILE_PLAYER
+    // TODO: Use glyph component or similar to determine tile
+    cmdbuf_tile(&cmd_buf, platform, ATLAS_TILES, TILE_PLAYER, screen_x,
+                screen_y, platform->tile_size, platform->tile_size);
   }
-  if (viewport_start_y < 0)
-    viewport_start_y = 0;
 
-  int message_area_y = viewport_start_y * platform->tile_size;
+// Draw message log at bottom of screen
+#define MESSAGE_DISPLAY_LINES 5
 
-  // Draw messages from circular buffer
+  // Get the most recent N messages
   int messages_to_show = MESSAGE_DISPLAY_LINES;
   if (messages_to_show > (int)world->messages_count) {
     messages_to_show = world->messages_count;
   }
 
-  // TODO: Support message scrolling - need to pass scroll offset to game_render
-  int message_scroll_offset = 0;
-  int start_msg_idx =
-      (int)world->messages_count - messages_to_show - message_scroll_offset;
-  if (start_msg_idx < 0)
-    start_msg_idx = 0;
-
-  for (int i = 0;
-       i < messages_to_show && start_msg_idx + i < (int)world->messages_count;
-       i++) {
-    int msg_idx =
-        (world->messages_first + start_msg_idx + i) % MESSAGE_COUNT_MAX;
+  for (int i = 0; i < messages_to_show; i++) {
+    // Get the i-th most recent message (counting from end)
+    int offset = (int)world->messages_count - messages_to_show + i;
+    int msg_idx = (world->messages_first + offset) % MESSAGE_COUNT_MAX;
     const char *text = world->messages[msg_idx].text;
+
+    // Position from bottom up
+    int y = platform->viewport_height_px -
+            (messages_to_show - i) * platform->tile_size;
 
     // Draw each character with semi-transparent background
     int x = 0;
-    int y = message_area_y + i * platform->tile_size;
     for (const char *p = text; *p; p++) {
       // Draw background rect for this glyph
       cmdbuf_rect(&cmd_buf, platform, x, y, platform->tile_size,
@@ -276,15 +317,13 @@ void game_render(WorldState *world, PlatformContext *platform) {
 
       // Draw the character glyph (CP437 layout: 16x16 grid)
       unsigned char ch = (unsigned char)*p;
-      cmdbuf_tile(&cmd_buf, platform, ATLAS_FONT, ch, x, y,
-                  platform->tile_size, platform->tile_size);
+      cmdbuf_tile(&cmd_buf, platform, ATLAS_FONT, ch, x, y, platform->tile_size,
+                  platform->tile_size);
 
       x += platform->tile_size;
     }
   }
 
   // Flush any remaining commands
-  if (cmd_buf.count > 0) {
-    platform->execute_render_commands(platform->impl_data, &cmd_buf);
-  }
+  cmdbuf_flush(&cmd_buf, platform);
 }

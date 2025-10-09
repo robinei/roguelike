@@ -16,21 +16,6 @@ void game_frame(WorldState *world, double dt);
 // render the game state using the provided platform context
 void game_render(WorldState *world, PlatformContext *platform);
 
-typedef enum {
-  INPUT_CMD_NONE,
-
-  INPUT_CMD_UP,
-  INPUT_CMD_UP_RIGHT,
-  INPUT_CMD_RIGHT,
-  INPUT_CMD_DOWN_RIGHT,
-  INPUT_CMD_DOWN,
-  INPUT_CMD_DOWN_LEFT,
-  INPUT_CMD_LEFT,
-  INPUT_CMD_UP_LEFT,
-
-  INPUT_CMD_PERIOD,
-} InputCommand;
-
 // called when input is received (like key presses). will drive forward the turn
 // based simulation
 void game_input(WorldState *world, InputCommand command);

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "common.h"
 #include "components.h"
 #include "turn_queue.h"
 #include <assert.h>
@@ -66,6 +67,46 @@ typedef struct {
 void output_message(const char *fmt, ...);
 
 // ============================================================================
+// Action animation
+// ============================================================================
+
+typedef enum {
+  ACTION_ANIM_NONE,
+  ACTION_ANIM_MOVE,
+} ActionAnimType;
+
+typedef struct {
+  ActionAnimType type;
+  EntityHandle actor;
+  double progress; // 0.0 to 1.0, updated by game_frame()
+  union {
+    struct {
+      Position from; // Tile coordinates
+      Position to;   // Tile coordinates
+    } move;
+  };
+} ActionAnim;
+
+// ============================================================================
+// World state
+// ============================================================================
+
+typedef enum {
+  INPUT_CMD_NONE,
+
+  INPUT_CMD_UP,
+  INPUT_CMD_UP_RIGHT,
+  INPUT_CMD_RIGHT,
+  INPUT_CMD_DOWN_RIGHT,
+  INPUT_CMD_DOWN,
+  INPUT_CMD_DOWN_LEFT,
+  INPUT_CMD_LEFT,
+  INPUT_CMD_UP_LEFT,
+
+  INPUT_CMD_PERIOD,
+} InputCommand;
+
+// ============================================================================
 // World state
 // ============================================================================
 
@@ -96,6 +137,8 @@ typedef struct {
                             // which per-turn login is performed when popped
   EntityHandle player;
   Map map;
+  ActionAnim anim;
+  InputCommand next_player_input; // Next input to execute for player
 } WorldState;
 
 extern WorldState *active_world;
