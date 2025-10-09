@@ -7,6 +7,7 @@
 #include "splitmix64.h"
 #include "turn_queue.h"
 #include "world.h"
+#include <math.h>
 
 static void particle_emit_system_tick() {
   world_query(i, BITS(particle_emitter)) {
@@ -57,7 +58,7 @@ void game_init(WorldState *world) {
   WORLD.player = entity_handle_from_index(spawn_player(0, 0));
 
   spawn_monster(10, 10);
-  spawn_monster(15, 10);
+  spawn_monster(0, 1);
 
   WORLD.map.width = 64;
   WORLD.map.height = 64;
@@ -88,9 +89,52 @@ void game_tick(WorldState *world, uint64_t tick) {
   particle_emit_system_tick();
 }
 
-static void process_turn_entity(void);
-static void process_npc_turn(EntityIndex entity);
-static int16_t execute_player_action(InputCommand command);
+static void process_turn_entity(void) {
+  EntityIndex entity = entity_handle_to_index(WORLD.turn_entity);
+  turn_queue_add_delay(entity, TURN_INTERVAL);
+
+  // reduce delay for all entities by TURN_INTERVAL once each turn, to avoid
+  // delay just growing endlessly. it would work even if it did grow endlessly,
+  // since we just always schedule the entity with the lowest delay (remember
+  // actions add their cost to the entity's delay)
+  world_query(i, BITS(turn_schedule)) {
+    WORLD.turn_schedule[i].delay -= TURN_INTERVAL;
+  }
+
+  // TODO: per-turn logic (regen, DOTs, cooldowns, etc.)
+}
+
+static void execute_player_action(InputCommand command) {
+  EntityIndex player = entity_handle_to_index(WORLD.player);
+
+  // TODO: implement actual actions
+  // For now, just basic movement/wait
+  switch (command) {
+  case INPUT_CMD_PERIOD:
+    // Wait - costs normal turn
+    break;
+
+  case INPUT_CMD_UP:
+  case INPUT_CMD_UP_RIGHT:
+  case INPUT_CMD_RIGHT:
+  case INPUT_CMD_DOWN_RIGHT:
+  case INPUT_CMD_DOWN:
+  case INPUT_CMD_DOWN_LEFT:
+  case INPUT_CMD_LEFT:
+  case INPUT_CMD_UP_LEFT:
+    action_move(player, (Direction)(command - INPUT_CMD_UP));
+    break;
+
+  default:
+    break;
+  }
+}
+
+static void process_npc_turn(EntityIndex entity) {
+  // TODO: AI logic for NPCs
+  // For now, just wait
+  action_move(entity, splitmix64_next() % 8);
+}
 
 void game_frame(WorldState *world, double dt) {
   active_world = world;
@@ -116,68 +160,17 @@ void game_frame(WorldState *world, double dt) {
     if (entity_handle_equals(next, WORLD.player)) {
       // Player's turn - do we have input?
       if (WORLD.next_player_input != INPUT_CMD_NONE) {
-        // Yes! Execute action, adjust queue position, clear input
-        int16_t action_cost = execute_player_action(WORLD.next_player_input);
-        EntityIndex player = entity_handle_to_index(WORLD.player);
-        turn_queue_add_delay(player, action_cost);
+        execute_player_action(WORLD.next_player_input);
         WORLD.next_player_input = INPUT_CMD_NONE;
       }
       // No input? Just wait (don't pop from queue)
     } else if (entity_handle_equals(next, WORLD.turn_entity)) {
-      EntityIndex entity = entity_handle_to_index(WORLD.turn_entity);
-      turn_queue_add_delay(entity, TURN_INTERVAL);
       process_turn_entity();
     } else {
       // NPC turn - will set anim if needed
       process_npc_turn(entity_handle_to_index(next));
     }
   }
-}
-
-static void process_turn_entity(void) {
-  // reduce delay for all entities by TURN_INTERVAL once each turn, to avoid
-  // delay just growing endlessly. it would work even if it did grow endlessly,
-  // since we just always schedule the entity with the lowest delay (remember
-  // actions add their cost to the entity's delay)
-  world_query(i, BITS(turn_schedule)) {
-    WORLD.turn_schedule[i].delay -= TURN_INTERVAL;
-  }
-
-  // TODO: per-turn logic (regen, DOTs, cooldowns, etc.)
-}
-
-static int16_t execute_player_action(InputCommand command) {
-  EntityIndex player = entity_handle_to_index(WORLD.player);
-
-  // TODO: implement actual actions
-  // For now, just basic movement/wait
-  switch (command) {
-  case INPUT_CMD_PERIOD:
-    // Wait - costs normal turn
-    return TURN_INTERVAL;
-
-  case INPUT_CMD_UP:
-  case INPUT_CMD_UP_RIGHT:
-  case INPUT_CMD_RIGHT:
-  case INPUT_CMD_DOWN_RIGHT:
-  case INPUT_CMD_DOWN:
-  case INPUT_CMD_DOWN_LEFT:
-  case INPUT_CMD_LEFT:
-  case INPUT_CMD_UP_LEFT:
-    action_move(player, (Direction)(command - INPUT_CMD_UP));
-    return TURN_INTERVAL;
-
-  default:
-    return TURN_INTERVAL;
-  }
-}
-
-static void process_npc_turn(EntityIndex entity) {
-  // TODO: AI logic for NPCs
-  // For now, just wait
-  action_move(entity, splitmix64_next() % 8);
-
-  turn_queue_add_delay(entity, TURN_INTERVAL);
 }
 
 void game_input(WorldState *world, InputCommand command) {
@@ -275,6 +268,33 @@ void game_render(WorldState *world, PlatformContext *platform) {
                 (WORLD.anim.move.to.x - WORLD.anim.move.from.x) * t;
       world_y = WORLD.anim.move.from.y +
                 (WORLD.anim.move.to.y - WORLD.anim.move.from.y) * t;
+    } else if (WORLD.anim.type == ACTION_ANIM_ATTACK &&
+               entity_handle_to_index(WORLD.anim.actor) == i) {
+      // Move slightly toward target and back (bump animation)
+      EntityIndex target_idx = entity_handle_to_index(WORLD.anim.attack.target);
+      if (entity_has(target_idx, position)) {
+        Position *target_pos = &WORLD.position[target_idx];
+
+        // Calculate direction to target
+        float dx = target_pos->x - pos->x;
+        float dy = target_pos->y - pos->y;
+
+        // Normalize
+        float len = sqrtf(dx * dx + dy * dy);
+        if (len > 0.001f) {
+          dx /= len;
+          dy /= len;
+        }
+
+        // Bump distance: 0.3 tiles
+        float t = WORLD.anim.progress;
+        // Ease out and back: move forward in first half, back in second half
+        float bump_amount = (t < 0.5f) ? t * 2.0f : (1.0f - t) * 2.0f;
+        bump_amount *= 0.3f;
+
+        world_x += dx * bump_amount;
+        world_y += dy * bump_amount;
+      }
     }
 
     // Convert world position to pixels, then to screen coordinates

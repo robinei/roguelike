@@ -48,6 +48,17 @@ static CombatStats gather_combat_stats(EntityIndex combatant) {
 }
 
 void action_combat(EntityIndex attacker, EntityIndex defender) {
+  turn_queue_add_delay(attacker, TURN_INTERVAL);
+
+  WORLD.anim =
+      (ActionAnim){.type = ACTION_ANIM_ATTACK,
+                   .actor = entity_handle_from_index(attacker),
+                   .attack = {.target = entity_handle_from_index(defender)}};
+
+  if (attacker == entity_handle_to_index(WORLD.player)) {
+    output_message("You attacked!");
+  }
+
   CombatStats attacker_stats = gather_combat_stats(attacker);
   CombatStats defender_stats = gather_combat_stats(defender);
 

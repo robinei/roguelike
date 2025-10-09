@@ -73,6 +73,7 @@ void output_message(const char *fmt, ...);
 typedef enum {
   ACTION_ANIM_NONE,
   ACTION_ANIM_MOVE,
+  ACTION_ANIM_ATTACK,
 } ActionAnimType;
 
 typedef struct {
@@ -84,6 +85,9 @@ typedef struct {
       Position from; // Tile coordinates
       Position to;   // Tile coordinates
     } move;
+    struct {
+      EntityHandle target;
+    } attack;
   };
 } ActionAnim;
 
