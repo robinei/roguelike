@@ -3,6 +3,7 @@
 #include "common.h"
 #include "components.h"
 #include "particles.h"
+#include "render_api.h"
 #include "turn_queue.h"
 #include "world.h"
 
@@ -164,4 +165,126 @@ void game_input(WorldState *world, InputCommand command) {
 
   // 3. Run queue until it's the player's turn again
   run_queue_until_player_turn();
+}
+
+void game_render(WorldState *world, PlatformContext *platform) {
+  active_world = world;
+
+  static CommandBuffer cmd_buf;
+  cmdbuf_clear(&cmd_buf);
+
+  // Get player position for camera centering
+  EntityIndex player_idx = entity_handle_to_index(world->player);
+  int camera_center_x = 0;
+  int camera_center_y = 0;
+
+  if (entity_has(player_idx, position)) {
+    camera_center_x = world->position[player_idx].x;
+    camera_center_y = world->position[player_idx].y;
+  }
+
+  // Calculate viewport dimensions in tiles
+  int viewport_tiles_x = platform->viewport_width_px / platform->tile_size;
+  int viewport_tiles_y = platform->viewport_height_px / platform->tile_size;
+
+  // Calculate top-left corner of viewport in world coordinates
+  int viewport_left = camera_center_x - viewport_tiles_x / 2;
+  int viewport_top = camera_center_y - viewport_tiles_y / 2;
+
+  // Draw visible tiles
+  for (int screen_y = 0; screen_y < viewport_tiles_y; screen_y++) {
+    for (int screen_x = 0; screen_x < viewport_tiles_x; screen_x++) {
+      int world_x = viewport_left + screen_x;
+      int world_y = viewport_top + screen_y;
+
+      // Check if tile is within map bounds
+      if (world_x < 0 || world_x >= (int)world->map.width || world_y < 0 ||
+          world_y >= (int)world->map.height) {
+        // Out of bounds - skip (background already cleared)
+        continue;
+      }
+
+      int tile = TILE_FLOOR;
+
+      // Draw checkerboard pattern as test
+      if ((world_x + world_y) % 2 == 0) {
+        tile = 0; // First tile
+      } else {
+        tile = 1; // Second tile
+      }
+
+      int px = screen_x * platform->tile_size;
+      int py = screen_y * platform->tile_size;
+      cmdbuf_tile(&cmd_buf, platform, ATLAS_TILES, tile, px, py,
+                  platform->tile_size, platform->tile_size);
+    }
+  }
+
+  // Draw player at center of screen
+  if (entity_has(player_idx, position)) {
+    int player_screen_x = (viewport_tiles_x / 2) * platform->tile_size;
+    int player_screen_y = (viewport_tiles_y / 2) * platform->tile_size;
+    cmdbuf_tile(&cmd_buf, platform, ATLAS_TILES, TILE_PLAYER, player_screen_x,
+                player_screen_y, platform->tile_size, platform->tile_size);
+  }
+
+  // Draw message log at bottom of screen
+  #define MESSAGE_DISPLAY_LINES 5
+  int message_viewport_tiles = MESSAGE_DISPLAY_LINES;
+
+  // Check if the bottom-most tile is partial (would cut off last message line)
+  bool bottom_tile_partial =
+      (platform->viewport_height_px % platform->tile_size) != 0;
+
+  // If bottom tile is partial, start messages one tile higher
+  int viewport_start_y = viewport_tiles_y - message_viewport_tiles;
+  if (bottom_tile_partial && viewport_start_y > 0) {
+    viewport_start_y--;
+  }
+  if (viewport_start_y < 0)
+    viewport_start_y = 0;
+
+  int message_area_y = viewport_start_y * platform->tile_size;
+
+  // Draw messages from circular buffer
+  int messages_to_show = MESSAGE_DISPLAY_LINES;
+  if (messages_to_show > (int)world->messages_count) {
+    messages_to_show = world->messages_count;
+  }
+
+  // TODO: Support message scrolling - need to pass scroll offset to game_render
+  int message_scroll_offset = 0;
+  int start_msg_idx =
+      (int)world->messages_count - messages_to_show - message_scroll_offset;
+  if (start_msg_idx < 0)
+    start_msg_idx = 0;
+
+  for (int i = 0;
+       i < messages_to_show && start_msg_idx + i < (int)world->messages_count;
+       i++) {
+    int msg_idx =
+        (world->messages_first + start_msg_idx + i) % MESSAGE_COUNT_MAX;
+    const char *text = world->messages[msg_idx].text;
+
+    // Draw each character with semi-transparent background
+    int x = 0;
+    int y = message_area_y + i * platform->tile_size;
+    for (const char *p = text; *p; p++) {
+      // Draw background rect for this glyph
+      cmdbuf_rect(&cmd_buf, platform, x, y, platform->tile_size,
+                  platform->tile_size, RGBA(0, 0, 0, 192));
+
+      // Draw the character glyph (CP437 layout: 16x16 grid)
+      unsigned char ch = (unsigned char)*p;
+      cmdbuf_tile(&cmd_buf, platform, ATLAS_FONT, ch, x, y,
+                  platform->tile_size, platform->tile_size);
+
+      x += platform->tile_size;
+    }
+  }
+
+  // Flush any remaining commands
+  if (cmd_buf.count > 0) {
+    platform->execute_render_commands(platform->impl_data, &cmd_buf);
+  }
 }

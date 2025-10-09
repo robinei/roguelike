@@ -1,5 +1,6 @@
 #include "atlas_view.h"
 #include "game.h"
+#include "render_api.h"
 #include "world.h"
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_keycode.h>
@@ -12,15 +13,6 @@
 // Tile constants
 #define TILE_SIZE 12
 #define TILE_PADDING 1 // 1 pixel transparent border between tiles
-
-// Tile enum - semantic names for tiles
-typedef enum {
-  TILE_FLOOR = 0,
-  TILE_WALL = 1,
-  TILE_PLAYER = 2884,
-  TILE_DOOR = 50,
-  // Add more as needed based on the tileset
-} TileType;
 
 typedef struct {
   SDL_Window *window;
@@ -180,175 +172,107 @@ static void shutdown_renderer(Renderer *r) {
   SDL_Quit();
 }
 
-// Draw a single character using CP437 font
-static void draw_char(Renderer *r, unsigned char ch, int screen_x,
-                      int screen_y) {
-  int scaled_size = r->scaled_tile_size;
-
-  // Draw semi-transparent black background behind the character
-  SDL_FRect bg = {
-      .x = (float)screen_x,
-      .y = (float)screen_y,
-      .w = (float)scaled_size,
-      .h = (float)scaled_size,
-  };
-  SDL_SetRenderDrawColor(r->renderer, 0, 0, 0, 192); // 75% opacity
-  SDL_RenderFillRect(r->renderer, &bg);
-
-  // CP437 layout: 16 columns x 16 rows
-  int glyph_x = (ch % 16) * TILE_SIZE;
-  int glyph_y = (ch / 16) * TILE_SIZE;
-
-  SDL_FRect src = {
-      .x = (float)glyph_x,
-      .y = (float)glyph_y,
-      .w = TILE_SIZE,
-      .h = TILE_SIZE,
-  };
-
-  SDL_FRect dst = {
-      .x = (float)screen_x,
-      .y = (float)screen_y,
-      .w = (float)scaled_size,
-      .h = (float)scaled_size,
-  };
-
-  SDL_RenderTexture(r->renderer, r->font_texture, &src, &dst);
+// Extract RGBA components from packed color
+static inline void extract_rgba(uint32_t color, uint8_t *r, uint8_t *g,
+                                uint8_t *b, uint8_t *a) {
+  *r = (color >> 24) & 0xFF;
+  *g = (color >> 16) & 0xFF;
+  *b = (color >> 8) & 0xFF;
+  *a = color & 0xFF;
 }
 
-// Draw a string of text
-static void draw_text(Renderer *r, const char *text, int screen_x,
-                      int screen_y) {
-  int x = screen_x;
-  int scaled_size = r->scaled_tile_size;
-  for (const char *p = text; *p; p++) {
-    draw_char(r, (unsigned char)*p, x, screen_y);
-    x += scaled_size;
-  }
-}
+// Execute a command buffer - callback for PlatformContext
+static void execute_render_commands(void *impl_data,
+                                    const CommandBuffer *buffer) {
+  Renderer *r = (Renderer *)impl_data;
 
-// Draw a single tile at screen position (x, y) in pixels
-static void draw_tile(Renderer *r, int tile_index, int screen_x, int screen_y) {
-  // Calculate tile position in atlas, accounting for padding
-  int tile_x = tile_index % r->atlas_cols;
-  int tile_y = tile_index / r->atlas_cols;
+  for (int i = 0; i < buffer->count; i++) {
+    const int32_t *data = &buffer->data[i * 6];
 
-  // Atlas position with padding
-  int atlas_x = TILE_PADDING + tile_x * (TILE_SIZE + TILE_PADDING);
-  int atlas_y = TILE_PADDING + tile_y * (TILE_SIZE + TILE_PADDING);
+    switch (buffer->types[i]) {
+    case RENDER_CMD_TILE: {
+      AtlasId atlas_id = (AtlasId)data[0];
+      int tile_index = data[1];
+      int x = data[2];
+      int y = data[3];
+      int w = data[4];
+      int h = data[5];
 
-  int scaled_size = r->scaled_tile_size;
+      // Select the appropriate texture
+      SDL_Texture *texture =
+          (atlas_id == ATLAS_TILES) ? r->atlas_texture : r->font_texture;
 
-  SDL_FRect src = {
-      .x = (float)atlas_x,
-      .y = (float)atlas_y,
-      .w = TILE_SIZE,
-      .h = TILE_SIZE,
-  };
+      // Calculate tile position in atlas
+      int atlas_cols =
+          (atlas_id == ATLAS_TILES) ? r->atlas_cols : 16; // Font is 16x16
+      int tile_x = tile_index % atlas_cols;
+      int tile_y = tile_index / atlas_cols;
 
-  SDL_FRect dst = {
-      .x = (float)screen_x,
-      .y = (float)screen_y,
-      .w = (float)scaled_size,
-      .h = (float)scaled_size,
-  };
-
-  SDL_RenderTexture(r->renderer, r->atlas_texture, &src, &dst);
-}
-
-static void render_world(Renderer *r, WorldState *world) {
-  // Clear to black
-  SDL_SetRenderDrawColor(r->renderer, 0, 0, 0, 255);
-  SDL_RenderClear(r->renderer);
-
-  // Get player position for camera centering
-  EntityIndex player_idx = entity_handle_to_index(world->player);
-  int camera_center_x = 0;
-  int camera_center_y = 0;
-
-  if (entity_has(player_idx, position)) {
-    camera_center_x = world->position[player_idx].x;
-    camera_center_y = world->position[player_idx].y;
-  }
-
-  // Calculate top-left corner of viewport in world coordinates
-  int viewport_left = camera_center_x - r->viewport_tiles_x / 2;
-  int viewport_top = camera_center_y - r->viewport_tiles_y / 2;
-
-  // Draw visible tiles
-  for (int screen_y = 0; screen_y < r->viewport_tiles_y; screen_y++) {
-    for (int screen_x = 0; screen_x < r->viewport_tiles_x; screen_x++) {
-      int world_x = viewport_left + screen_x;
-      int world_y = viewport_top + screen_y;
-
-      // Check if tile is within map bounds
-      if (world_x < 0 || world_x >= (int)world->map.width || world_y < 0 ||
-          world_y >= (int)world->map.height) {
-        // Out of bounds - draw nothing (already cleared to black)
-        continue;
-      }
-
-      int tile = TILE_FLOOR;
-
-      // Draw checkerboard pattern as test
-      if ((world_x + world_y) % 2 == 0) {
-        tile = 0; // First tile
+      // Atlas position (with padding for tile atlas, no padding for font)
+      int atlas_x, atlas_y;
+      if (atlas_id == ATLAS_TILES) {
+        atlas_x = TILE_PADDING + tile_x * (TILE_SIZE + TILE_PADDING);
+        atlas_y = TILE_PADDING + tile_y * (TILE_SIZE + TILE_PADDING);
       } else {
-        tile = 1; // Second tile
+        atlas_x = tile_x * TILE_SIZE;
+        atlas_y = tile_y * TILE_SIZE;
       }
 
-      draw_tile(r, tile, screen_x * r->scaled_tile_size,
-                screen_y * r->scaled_tile_size);
+      SDL_FRect src = {
+          .x = (float)atlas_x,
+          .y = (float)atlas_y,
+          .w = TILE_SIZE,
+          .h = TILE_SIZE,
+      };
+
+      SDL_FRect dst = {
+          .x = (float)x,
+          .y = (float)y,
+          .w = (float)w,
+          .h = (float)h,
+      };
+
+      SDL_RenderTexture(r->renderer, texture, &src, &dst);
+      break;
+    }
+
+    case RENDER_CMD_RECT: {
+      int x = data[0];
+      int y = data[1];
+      int w = data[2];
+      int h = data[3];
+      uint32_t color = (uint32_t)data[4];
+
+      uint8_t red, green, blue, alpha;
+      extract_rgba(color, &red, &green, &blue, &alpha);
+
+      SDL_SetRenderDrawColor(r->renderer, red, green, blue, alpha);
+      SDL_FRect rect = {
+          .x = (float)x,
+          .y = (float)y,
+          .w = (float)w,
+          .h = (float)h,
+      };
+      SDL_RenderFillRect(r->renderer, &rect);
+      break;
+    }
+
+    case RENDER_CMD_LINE: {
+      int x0 = data[0];
+      int y0 = data[1];
+      int x1 = data[2];
+      int y1 = data[3];
+      uint32_t color = (uint32_t)data[4];
+
+      uint8_t red, green, blue, alpha;
+      extract_rgba(color, &red, &green, &blue, &alpha);
+
+      SDL_SetRenderDrawColor(r->renderer, red, green, blue, alpha);
+      SDL_RenderLine(r->renderer, (float)x0, (float)y0, (float)x1, (float)y1);
+      break;
+    }
     }
   }
-
-  // Draw player at center of screen
-  if (entity_has(player_idx, position)) {
-    int player_screen_x = (r->viewport_tiles_x / 2) * r->scaled_tile_size;
-    int player_screen_y = (r->viewport_tiles_y / 2) * r->scaled_tile_size;
-    draw_tile(r, TILE_PLAYER, player_screen_x, player_screen_y);
-  }
-
-  // Draw message log at bottom of screen
-  // Calculate how many viewport tiles the messages occupy
-  int message_viewport_tiles = MESSAGE_DISPLAY_LINES;
-
-  // Check if the bottom-most tile is partial (would cut off last message line)
-  bool bottom_tile_partial = (r->window_height % r->scaled_tile_size) != 0;
-
-  // If bottom tile is partial, start messages one tile higher
-  int viewport_start_y = r->viewport_tiles_y - message_viewport_tiles;
-  if (bottom_tile_partial && viewport_start_y > 0) {
-    viewport_start_y--;
-  }
-  if (viewport_start_y < 0)
-    viewport_start_y = 0;
-
-  int message_area_y = viewport_start_y * r->scaled_tile_size;
-
-  // Draw messages from circular buffer (draw_char will draw backgrounds
-  // per-glyph)
-  int messages_to_show = MESSAGE_DISPLAY_LINES;
-  if (messages_to_show > (int)world->messages_count) {
-    messages_to_show = world->messages_count;
-  }
-
-  // Calculate which messages to show based on scroll offset
-  int start_msg_idx =
-      (int)world->messages_count - messages_to_show - r->message_scroll_offset;
-  if (start_msg_idx < 0)
-    start_msg_idx = 0;
-
-  for (int i = 0;
-       i < messages_to_show && start_msg_idx + i < (int)world->messages_count;
-       i++) {
-    int msg_idx =
-        (world->messages_first + start_msg_idx + i) % MESSAGE_COUNT_MAX;
-    int y = message_area_y + i * r->scaled_tile_size;
-    draw_text(r, world->messages[msg_idx].text, 0, y);
-  }
-
-  SDL_RenderPresent(r->renderer);
 }
 
 static InputCommand map_key_to_command(SDL_Keycode key) {
@@ -485,9 +409,9 @@ int main(int argc, char *argv[]) {
       // Print FPS every 10 ticks (once per second)
       if (tick_counter % 10 == 0) {
         double elapsed_sec = (current_time - fps_report_time) / 1000000000.0;
-        // double fps = frame_count / elapsed_sec;
+        double fps = frame_count / elapsed_sec;
         // printf("FPS: %.1f\n", fps);
-        (void)elapsed_sec; // Suppress unused warning
+        (void)fps; // Suppress unused warning
         frame_count = 0;
         fps_report_time = current_time;
       }
@@ -500,7 +424,24 @@ int main(int argc, char *argv[]) {
     game_frame(&world, dt);
 
     // Render
-    render_world(&renderer, &world);
+    // Clear to black
+    SDL_SetRenderDrawColor(renderer.renderer, 0, 0, 0, 255);
+    SDL_RenderClear(renderer.renderer);
+
+    // Set up platform context
+    PlatformContext platform = {
+        .viewport_width_px = renderer.window_width,
+        .viewport_height_px = renderer.window_height,
+        .tile_size = renderer.scaled_tile_size,
+        .execute_render_commands = execute_render_commands,
+        .impl_data = &renderer,
+    };
+
+    // Call game render
+    game_render(&world, &platform);
+
+    // Present
+    SDL_RenderPresent(renderer.renderer);
     frame_count++;
   }
 

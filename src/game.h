@@ -1,8 +1,7 @@
 #pragma once
 
-#include "common.h"
+#include "render_api.h"
 #include "world.h"
-#include <stdint.h>
 
 // called once at game launch
 void game_init(WorldState *world);
@@ -13,6 +12,9 @@ void game_tick(WorldState *world, uint64_t tick);
 
 // run once per frame
 void game_frame(WorldState *world, double dt);
+
+// render the game state using the provided platform context
+void game_render(WorldState *world, PlatformContext *platform);
 
 typedef enum {
   INPUT_CMD_NONE,
