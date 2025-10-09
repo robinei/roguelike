@@ -1,6 +1,6 @@
 CC = clang
 CFLAGS = -std=c99 -Wall -Wextra -g -MMD -MP
-LDFLAGS = -lm
+LDFLAGS = -lm -lSDL3
 BUILDDIR = build
 TARGET = $(BUILDDIR)/roguelike
 

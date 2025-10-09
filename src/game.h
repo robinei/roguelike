@@ -1,5 +1,6 @@
 #pragma once
 
+#include "common.h"
 #include "world.h"
 #include <stdint.h>
 
@@ -14,6 +15,8 @@ void game_tick(WorldState *world, uint64_t tick);
 void game_frame(WorldState *world, double dt);
 
 typedef enum {
+  INPUT_CMD_NONE,
+
   INPUT_CMD_UP,
   INPUT_CMD_UP_RIGHT,
   INPUT_CMD_RIGHT,

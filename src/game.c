@@ -1,4 +1,6 @@
 #include "game.h"
+#include "actions/actions.h"
+#include "common.h"
 #include "components.h"
 #include "particles.h"
 #include "turn_queue.h"
@@ -24,6 +26,14 @@ static void particle_emit_system_tick() {
   }
 }
 
+static EntityIndex spawn_player(int x, int y) {
+  EntityIndex player = entity_alloc();
+  entity_add(player, position, ((Position){x, y}));
+  entity_add(player, health, HEALTH_FULL);
+  turn_queue_insert(player, 0);
+  return player;
+}
+
 void game_init(WorldState *world) {
   active_world = world;
 
@@ -33,6 +43,30 @@ void game_init(WorldState *world) {
   EntityIndex turn_index = entity_alloc();
   world->turn_entity = entity_handle_from_index(turn_index);
   turn_queue_insert(turn_index, TURN_INTERVAL);
+
+  WORLD.player = entity_handle_from_index(spawn_player(0, 0));
+  WORLD.map.width = 64;
+  WORLD.map.height = 64;
+
+  // Generate test messages
+  output_message("Welcome to the dungeon!");
+  output_message("You hear strange noises in the distance.");
+  output_message("A cold wind blows through the corridor.");
+  output_message("You find a rusty sword lying on the ground.");
+  output_message("The walls are covered in ancient runes.");
+  output_message("You step on something crunchy.");
+  output_message("A rat scurries past your feet.");
+  output_message("The air smells of decay and mold.");
+  output_message("You hear dripping water somewhere nearby.");
+  output_message("Your torch flickers ominously.");
+  output_message("You feel like you're being watched.");
+  output_message("The door ahead is locked.");
+  output_message("You found a key!");
+  output_message("The key fits the lock perfectly.");
+  output_message("The door creaks open slowly.");
+  output_message("You enter a large chamber.");
+  output_message("Something growls in the darkness.");
+  output_message("Roll for initiative!");
 }
 
 void game_tick(WorldState *world, uint64_t tick) {
@@ -46,6 +80,14 @@ void game_frame(WorldState *world, double dt) {
 }
 
 static void process_turn_entity(void) {
+  // reduce delay for all entities by TURN_INTERVAL once each turn, to avoid
+  // delay just growing endlessly. it would work even if it did grow endlessly,
+  // since we just always schedule the entity with the lowest delay (remember
+  // actions add their cost to the entity's delay)
+  world_query(i, BITS(turn_schedule)) {
+    WORLD.turn_schedule[i].delay -= TURN_INTERVAL;
+  }
+
   // TODO: per-turn logic (regen, DOTs, cooldowns, etc.)
 }
 
@@ -67,8 +109,7 @@ static int16_t execute_player_action(InputCommand command) {
   case INPUT_CMD_DOWN_LEFT:
   case INPUT_CMD_LEFT:
   case INPUT_CMD_UP_LEFT:
-    // Movement - costs normal turn
-    // TODO: actually move the player
+    action_move(player, (Direction)(command - INPUT_CMD_UP));
     return TURN_INTERVAL;
 
   default:

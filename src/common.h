@@ -38,6 +38,52 @@ typedef enum {
   DIR_NW,
 } Direction;
 
+static inline int dir_dx(Direction dir) {
+  switch (dir) {
+  case DIR_N:
+    return 0;
+  case DIR_NE:
+    return 1;
+  case DIR_E:
+    return 1;
+  case DIR_SE:
+    return 1;
+  case DIR_S:
+    return 0;
+  case DIR_SW:
+    return -1;
+  case DIR_W:
+    return -1;
+  case DIR_NW:
+    return -1;
+  default:
+    return 0;
+  }
+}
+
+static inline int dir_dy(Direction dir) {
+  switch (dir) {
+  case DIR_N:
+    return -1;
+  case DIR_NE:
+    return -1;
+  case DIR_E:
+    return 0;
+  case DIR_SE:
+    return 1;
+  case DIR_S:
+    return 1;
+  case DIR_SW:
+    return 1;
+  case DIR_W:
+    return 0;
+  case DIR_NW:
+    return -1;
+  default:
+    return 0;
+  }
+}
+
 // ============================================================================
 // Bitset utilities (operate on BITSET_WORDS-sized bitsets)
 // ============================================================================

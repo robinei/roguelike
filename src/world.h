@@ -46,8 +46,8 @@
 #define MAP_HEIGHT_MAX 512
 
 typedef struct {
-  uint32_t width;
-  uint32_t height;
+  int width;
+  int height;
   uint8_t flags[MAP_WIDTH_MAX * MAP_HEIGHT_MAX];
 } Map;
 
