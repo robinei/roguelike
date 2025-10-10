@@ -1,3 +1,4 @@
+// https://github.com/mickjc750/prnf
 /*
 -------------------------------------------------------------------------------------
 # BUILD OPTIONS
@@ -521,10 +522,13 @@ AVR targets.
 	static bool is_centered_string(struct placeholder_struct* placeholder);
 
 	static bool prnf_is_digit(char x);
+#if 0
 	static char ascii_hex_digit(uint_least8_t x);
-	
+#endif
 	static uint_least8_t ulong2asc_revdec(char* buf, prnf_ulong_t il);
+#if 0
 	static uint_least8_t ulong2asc_revbin(char* buf, prnf_ulong_t il);
+#endif
 	static uint_least8_t ulong2asc_revhex(char* buf, prnf_ulong_t il);
 
 	static void out_char(struct out_struct* out_info, char x);
@@ -1370,7 +1374,7 @@ static bool prnf_is_digit(char x)
 {
 	return ('0' <=x && x <= '9');
 }
-
+#if 0
 static char ascii_hex_digit(uint_least8_t x)
 {
 	char retval;
@@ -1383,7 +1387,7 @@ static char ascii_hex_digit(uint_least8_t x)
 	
 	return retval;
 }
-
+#endif
 #ifdef PRNF_SUPPORT_FLOAT
 static struct eng_struct get_eng(prnf_float_t value)
 {

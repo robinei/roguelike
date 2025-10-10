@@ -1,3 +1,4 @@
+#include "common.h"
 #include "random.h"
 #include "world.h"
 #include <stdint.h>
@@ -62,10 +63,11 @@ void particles_spawn_directed(ParticleType type, float x, float y, float dx,
   float ttl = get_ttl(type);
 
   // Normalize direction vector
-  float len = sqrtf(dx * dx + dy * dy);
-  if (len > 0.001f) {
-    dx /= len;
-    dy /= len;
+  float len2 = dx * dx + dy * dy;
+  if (len2 > 0.001f) {
+    float s = rsqrt(len2);
+    dx *= s;
+    dy *= s;
   } else {
     // Zero vector, fallback to random
     dx = 1.0f;

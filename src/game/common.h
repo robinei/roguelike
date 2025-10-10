@@ -3,19 +3,52 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+// Quake 3 fast inverse square root
+static inline float rsqrt(float number) {
+  float x2 = number * 0.5f;
+  float y = number;
+  int32_t i = *(int32_t *)&y; // evil floating point bit level hacking
+  i = 0x5f3759df - (i >> 1);  // what the fuck?
+  y = *(float *)&i;
+  y = y * (1.5f - (x2 * y * y)); // 1st iteration
+  y = y * (1.5f - (x2 * y * y)); // 2nd iteration, this can be removed
+  return y;
+}
+
 // For freestanding WASM builds, use compiler builtins instead of libc
 #ifdef __wasm__
+#define NULL ((void *)0)
 #define sqrtf __builtin_sqrt
 #define sinf __builtin_sin
 #define cosf __builtin_cos
 #define atan2f __builtin_atan2
 #define memcpy __builtin_memcpy
 #define memset __builtin_memset
-// Simple assert for WASM builds - just trap on failure
+
+// Log levels matching JavaScript console
+typedef enum {
+  LOG_DEBUG = 0,
+  LOG_LOG = 1,
+  LOG_INFO = 2,
+  LOG_WARN = 3,
+  LOG_ERROR = 4,
+} LogLevel;
+
+// Logging support - imported from JavaScript
+extern void js_log(LogLevel level, const char *message);
+
+// Helper macros for stringification
+#define STRINGIFY(x) #x
+#define TOSTRING(x) STRINGIFY(x)
+
+// Simple assert for WASM builds - log file:line and trap on failure
 #define assert(x)                                                              \
   do {                                                                         \
-    if (!(x))                                                                  \
+    if (!(x)) {                                                                \
+      js_log(LOG_ERROR,                                                        \
+             __FILE__ ":" TOSTRING(__LINE__) ": Assertion failed: " #x);       \
       __builtin_trap();                                                        \
+    }                                                                          \
   } while (0)
 #else
 #include <assert.h>

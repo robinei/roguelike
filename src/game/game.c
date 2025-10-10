@@ -288,10 +288,11 @@ void game_render(WorldState *world, PlatformContext *platform) {
         float dy = target_pos->y - pos->y;
 
         // Normalize
-        float len = sqrtf(dx * dx + dy * dy);
-        if (len > 0.001f) {
-          dx /= len;
-          dy /= len;
+        float len2 = dx * dx + dy * dy;
+        if (len2 > 0.001f) {
+          float s = rsqrt(len2);
+          dx *= s;
+          dy *= s;
         }
 
         // Bump distance: 0.3 tiles
@@ -355,3 +356,22 @@ void game_render(WorldState *world, PlatformContext *platform) {
   // Flush any remaining commands
   cmdbuf_flush(&cmd_buf, platform);
 }
+
+#ifdef __wasm__
+// Imported from JavaScript
+extern void execute_render_commands(void *impl_data,
+                                    const CommandBuffer *buffer);
+
+void game_render_wasm(WorldState *world, int viewport_width_px,
+                      int viewport_height_px, int tile_size) {
+  PlatformContext platform = {
+      .viewport_width_px = viewport_width_px,
+      .viewport_height_px = viewport_height_px,
+      .tile_size = tile_size,
+      .execute_render_commands = execute_render_commands,
+      .impl_data = NULL, // Not used in WASM
+  };
+
+  game_render(world, &platform);
+}
+#endif
