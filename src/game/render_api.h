@@ -3,17 +3,13 @@
 #include <stdint.h>
 
 // ============================================================================
-// Texture atlas identifiers
+// Tile constants - combined atlas layout
 // ============================================================================
 
-typedef enum {
-  ATLAS_TILES,
-  ATLAS_FONT,
-} AtlasId;
-
-// ============================================================================
-// Tile enum - semantic names for tiles (in tiles atlas)
-// ============================================================================
+// Original tileset has 10300 tiles (indices 0-10299)
+// Font glyphs start at index 10300 (256 glyphs from CP437)
+// Last tile (10711) is white for colored rects
+#define FONT_BASE_INDEX 10300
 
 typedef enum {
   TILE_FLOOR = 0,
@@ -77,9 +73,9 @@ void cmdbuf_clear(CommandBuffer *buf);
 void cmdbuf_flush(CommandBuffer *buf, PlatformContext *ctx);
 
 // Draw textured rect from atlas (coordinates in pixels)
-// TILE: atlas_id, tile_index, x, y, w, h (6 ints)
-void cmdbuf_tile(CommandBuffer *buf, PlatformContext *ctx, AtlasId atlas,
-                 int tile_index, int x, int y, int w, int h);
+// TILE: tile_index, x, y, w, h (5 ints, using combined atlas)
+void cmdbuf_tile(CommandBuffer *buf, PlatformContext *ctx, int tile_index,
+                 int x, int y, int w, int h);
 
 // Draw colored rect (coordinates in pixels)
 // RECT: x, y, w, h, color (5 ints)

@@ -252,7 +252,7 @@ void game_render(WorldState *world, PlatformContext *platform) {
           tile = 1; // Second tile
         }
 
-        cmdbuf_tile(&cmd_buf, platform, ATLAS_TILES, tile, screen_x, screen_y,
+        cmdbuf_tile(&cmd_buf, platform, tile, screen_x, screen_y,
                     platform->tile_size, platform->tile_size);
       }
       screen_x += platform->tile_size;
@@ -314,8 +314,8 @@ void game_render(WorldState *world, PlatformContext *platform) {
 
     // For now, all entities are rendered as TILE_PLAYER
     // TODO: Use glyph component or similar to determine tile
-    cmdbuf_tile(&cmd_buf, platform, ATLAS_TILES, TILE_PLAYER, screen_x,
-                screen_y, platform->tile_size, platform->tile_size);
+    cmdbuf_tile(&cmd_buf, platform, TILE_PLAYER, screen_x, screen_y,
+                platform->tile_size, platform->tile_size);
   }
 
 // Draw message log at bottom of screen
@@ -344,10 +344,10 @@ void game_render(WorldState *world, PlatformContext *platform) {
       cmdbuf_rect(&cmd_buf, platform, x, y, platform->tile_size,
                   platform->tile_size, RGBA(0, 0, 0, 192));
 
-      // Draw the character glyph (CP437 layout: 16x16 grid)
+      // Draw the character glyph (glyphs start at FONT_BASE_INDEX in combined atlas)
       unsigned char ch = (unsigned char)*p;
-      cmdbuf_tile(&cmd_buf, platform, ATLAS_FONT, ch, x, y, platform->tile_size,
-                  platform->tile_size);
+      cmdbuf_tile(&cmd_buf, platform, FONT_BASE_INDEX + ch, x, y,
+                  platform->tile_size, platform->tile_size);
 
       x += platform->tile_size;
     }

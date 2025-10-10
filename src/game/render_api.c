@@ -16,13 +16,13 @@ static void cmdbuf_flush_if_full(CommandBuffer *buf, PlatformContext *ctx) {
   }
 }
 
-void cmdbuf_tile(CommandBuffer *buf, PlatformContext *ctx, AtlasId atlas,
-                 int tile_index, int x, int y, int w, int h) {
+void cmdbuf_tile(CommandBuffer *buf, PlatformContext *ctx, int tile_index,
+                 int x, int y, int w, int h) {
   cmdbuf_flush_if_full(buf, ctx);
 
   int idx = buf->count;
   buf->types[idx] = RENDER_CMD_TILE;
-  buf->data[idx * 6 + 0] = atlas;
+  buf->data[idx * 6 + 0] = 0; // Unused (was atlas_id)
   buf->data[idx * 6 + 1] = tile_index;
   buf->data[idx * 6 + 2] = x;
   buf->data[idx * 6 + 3] = y;

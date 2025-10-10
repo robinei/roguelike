@@ -31,13 +31,14 @@ HOSTBIN_LDFLAGS = -lm -lSDL3
 HOSTBIN_SRCS = $(shell find src/sdl3_host -name '*.c')
 HOSTBIN_OBJS = $(HOSTBIN_SRCS:%.c=$(BUILDDIR)/%.o)
 HOSTBIN_DEPS = $(HOSTBIN_SRCS:%.c=$(BUILDDIR)/%.d)
-HOSTBIN_TARGET = $(BUILDDIR)/roguelike
+HOSTBIN_NAME = roguelike
+HOSTBIN_TARGET = $(BUILDDIR)/$(HOSTBIN_NAME)
 
 # ============================================================================
 # Web host
 # ============================================================================
 WEB_HOST_DIR = $(BUILDDIR)/web
-WEB_HOST_ASSETS = urizen_onebit_tileset__v2d0.png cp437_12x12.png
+COMBINED_ATLAS = $(BUILDDIR)/combined_tileset.png
 WEB_HOST_SOURCES = src/web_host/index.html src/web_host/game.js
 
 # ============================================================================
@@ -45,12 +46,18 @@ WEB_HOST_SOURCES = src/web_host/index.html src/web_host/game.js
 # ============================================================================
 .PHONY: all clean wasm serve
 
-all: $(GAMELIB_TARGET) $(HOSTBIN_TARGET)
+all: $(GAMELIB_TARGET) $(HOSTBIN_TARGET) $(COMBINED_ATLAS)
 
-wasm: $(WASM_TARGET)
+run: all
+	@cd $(BUILDDIR); ./$(HOSTBIN_NAME)
+
+$(COMBINED_ATLAS): urizen_onebit_tileset__v2d0.png cp437_12x12.png combine_atlases.py
+	python3 combine_atlases.py $(COMBINED_ATLAS)
+
+wasm: $(WASM_TARGET) $(COMBINED_ATLAS)
 	@mkdir -p $(WEB_HOST_DIR)
 	@cp $(WEB_HOST_SOURCES) $(WEB_HOST_DIR)/
-	@cp $(WEB_HOST_ASSETS) $(WEB_HOST_DIR)/
+	@cp $(COMBINED_ATLAS) $(WEB_HOST_DIR)/combined_tileset.png
 	@cp $(WASM_TARGET) $(WEB_HOST_DIR)/
 	@echo "Web build complete. Serve $(WEB_HOST_DIR)/ with a web server."
 

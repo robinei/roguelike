@@ -7,10 +7,10 @@ let worldStatePtr = null;
 let gl = null;
 let shaderProgram = null;
 let tileAtlas = null;
-let fontAtlas = null;
 
 // Game constants
 const TILE_SIZE = 12;
+const TILE_PADDING = 1; // padding in tile atlas
 const WORLD_STATE_SIZE = 1024 * 1024 * 4; // 4MB for world state
 
 // Input command enum (must match C enum)
@@ -34,25 +34,22 @@ const RenderCommand = {
   LINE: 2,
 };
 
-// Atlas IDs
-const AtlasId = {
-  TILES: 0,
-  FONT: 1,
-};
-
 // WebGL shader sources
 const vertexShaderSource = `
   attribute vec2 a_position;
   attribute vec2 a_texCoord;
+  attribute vec4 a_color;
 
   uniform vec2 u_resolution;
 
   varying vec2 v_texCoord;
+  varying vec4 v_color;
 
   void main() {
     vec2 clipSpace = (a_position / u_resolution) * 2.0 - 1.0;
     gl_Position = vec4(clipSpace.x, -clipSpace.y, 0, 1);
     v_texCoord = a_texCoord;
+    v_color = a_color;
   }
 `;
 
@@ -60,17 +57,12 @@ const fragmentShaderSource = `
   precision mediump float;
 
   uniform sampler2D u_texture;
-  uniform vec4 u_color;
-  uniform bool u_useTexture;
 
   varying vec2 v_texCoord;
+  varying vec4 v_color;
 
   void main() {
-    if (u_useTexture) {
-      gl_FragColor = texture2D(u_texture, v_texCoord);
-    } else {
-      gl_FragColor = u_color;
-    }
+    gl_FragColor = texture2D(u_texture, v_texCoord) * v_color;
   }
 `;
 
@@ -92,18 +84,18 @@ function initWebGL(canvas) {
   shaderProgram.attribLocations = {
     position: gl.getAttribLocation(shaderProgram, 'a_position'),
     texCoord: gl.getAttribLocation(shaderProgram, 'a_texCoord'),
+    color: gl.getAttribLocation(shaderProgram, 'a_color'),
   };
 
   shaderProgram.uniformLocations = {
     resolution: gl.getUniformLocation(shaderProgram, 'u_resolution'),
     texture: gl.getUniformLocation(shaderProgram, 'u_texture'),
-    color: gl.getUniformLocation(shaderProgram, 'u_color'),
-    useTexture: gl.getUniformLocation(shaderProgram, 'u_useTexture'),
   };
 
   // Create buffers
   shaderProgram.positionBuffer = gl.createBuffer();
   shaderProgram.texCoordBuffer = gl.createBuffer();
+  shaderProgram.colorBuffer = gl.createBuffer();
 
   // Set up blending for transparency
   gl.enable(gl.BLEND);
@@ -169,76 +161,136 @@ function loadTexture(gl, url) {
   return texture;
 }
 
-// Draw a textured quad
-function drawQuad(x, y, w, h, atlasX, atlasY, atlasW, atlasH, texture) {
-  const positions = new Float32Array([
-    x, y,
-    x + w, y,
-    x, y + h,
-    x, y + h,
-    x + w, y,
-    x + w, y + h,
-  ]);
+// Batched rendering state
+let batchPositions = [];
+let batchTexCoords = [];
+let batchColors = [];
+let batchCount = 0;
 
-  const texWidth = texture.width || 1;
-  const texHeight = texture.height || 1;
+// Flush current batch to GPU
+function flushBatch() {
+  if (batchPositions.length === 0) return;
+
+  const vertexCount = batchPositions.length / 2;
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, shaderProgram.positionBuffer);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(batchPositions), gl.STREAM_DRAW);
+  gl.enableVertexAttribArray(shaderProgram.attribLocations.position);
+  gl.vertexAttribPointer(shaderProgram.attribLocations.position, 2, gl.FLOAT, false, 0, 0);
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, shaderProgram.texCoordBuffer);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(batchTexCoords), gl.STREAM_DRAW);
+  gl.enableVertexAttribArray(shaderProgram.attribLocations.texCoord);
+  gl.vertexAttribPointer(shaderProgram.attribLocations.texCoord, 2, gl.FLOAT, false, 0, 0);
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, shaderProgram.colorBuffer);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(batchColors), gl.STREAM_DRAW);
+  gl.enableVertexAttribArray(shaderProgram.attribLocations.color);
+  gl.vertexAttribPointer(shaderProgram.attribLocations.color, 4, gl.FLOAT, false, 0, 0);
+
+  gl.bindTexture(gl.TEXTURE_2D, tileAtlas);
+
+  gl.drawArrays(gl.TRIANGLES, 0, vertexCount);
+  batchCount++;
+
+  // Clear batch
+  batchPositions = [];
+  batchTexCoords = [];
+  batchColors = [];
+}
+
+// Add a textured quad to the batch
+function batchQuad(x, y, w, h, atlasX, atlasY, atlasW, atlasH) {
+  const texWidth = tileAtlas.width || 1;
+  const texHeight = tileAtlas.height || 1;
   const u0 = atlasX / texWidth;
   const v0 = atlasY / texHeight;
   const u1 = (atlasX + atlasW) / texWidth;
   const v1 = (atlasY + atlasH) / texHeight;
 
-  const texCoords = new Float32Array([
-    u0, v0,
-    u1, v0,
-    u0, v1,
-    u0, v1,
-    u1, v0,
-    u1, v1,
-  ]);
-
-  gl.bindBuffer(gl.ARRAY_BUFFER, shaderProgram.positionBuffer);
-  gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
-  gl.enableVertexAttribArray(shaderProgram.attribLocations.position);
-  gl.vertexAttribPointer(shaderProgram.attribLocations.position, 2, gl.FLOAT, false, 0, 0);
-
-  gl.bindBuffer(gl.ARRAY_BUFFER, shaderProgram.texCoordBuffer);
-  gl.bufferData(gl.ARRAY_BUFFER, texCoords, gl.STATIC_DRAW);
-  gl.enableVertexAttribArray(shaderProgram.attribLocations.texCoord);
-  gl.vertexAttribPointer(shaderProgram.attribLocations.texCoord, 2, gl.FLOAT, false, 0, 0);
-
-  gl.bindTexture(gl.TEXTURE_2D, texture);
-  gl.uniform1i(shaderProgram.uniformLocations.useTexture, 1);
-
-  gl.drawArrays(gl.TRIANGLES, 0, 6);
-}
-
-// Draw a colored rect
-function drawRect(x, y, w, h, r, g, b, a) {
-  const positions = new Float32Array([
+  batchPositions.push(
     x, y,
     x + w, y,
     x, y + h,
     x, y + h,
     x + w, y,
-    x + w, y + h,
-  ]);
+    x + w, y + h
+  );
 
-  gl.bindBuffer(gl.ARRAY_BUFFER, shaderProgram.positionBuffer);
-  gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
-  gl.enableVertexAttribArray(shaderProgram.attribLocations.position);
-  gl.vertexAttribPointer(shaderProgram.attribLocations.position, 2, gl.FLOAT, false, 0, 0);
+  batchTexCoords.push(
+    u0, v0,
+    u1, v0,
+    u0, v1,
+    u0, v1,
+    u1, v0,
+    u1, v1
+  );
 
-  gl.disableVertexAttribArray(shaderProgram.attribLocations.texCoord);
+  // White color (1, 1, 1, 1) for normal textured quads
+  batchColors.push(
+    1, 1, 1, 1,
+    1, 1, 1, 1,
+    1, 1, 1, 1,
+    1, 1, 1, 1,
+    1, 1, 1, 1,
+    1, 1, 1, 1
+  );
+}
 
-  gl.uniform1i(shaderProgram.uniformLocations.useTexture, 0);
-  gl.uniform4f(shaderProgram.uniformLocations.color, r / 255, g / 255, b / 255, a / 255);
+// Add a colored rect to the batch (using last white tile, modulated by vertex color)
+function batchRect(x, y, w, h, r, g, b, a) {
+  const tileAtlasCols = Math.floor((tileAtlas.width - TILE_PADDING) / (TILE_SIZE + TILE_PADDING));
+  const tileAtlasRows = Math.floor((tileAtlas.height - TILE_PADDING) / (TILE_SIZE + TILE_PADDING));
+  const whiteTileIndex = tileAtlasCols * tileAtlasRows - 1; // Last tile
+  const tileX = whiteTileIndex % tileAtlasCols;
+  const tileY = Math.floor(whiteTileIndex / tileAtlasCols);
+  const atlasX = TILE_PADDING + tileX * (TILE_SIZE + TILE_PADDING);
+  const atlasY = TILE_PADDING + tileY * (TILE_SIZE + TILE_PADDING);
 
-  gl.drawArrays(gl.TRIANGLES, 0, 6);
+  const texWidth = tileAtlas.width || 1;
+  const texHeight = tileAtlas.height || 1;
+  const u0 = atlasX / texWidth;
+  const v0 = atlasY / texHeight;
+  const u1 = (atlasX + TILE_SIZE) / texWidth;
+  const v1 = (atlasY + TILE_SIZE) / texHeight;
+
+  batchPositions.push(
+    x, y,
+    x + w, y,
+    x, y + h,
+    x, y + h,
+    x + w, y,
+    x + w, y + h
+  );
+
+  batchTexCoords.push(
+    u0, v0,
+    u1, v0,
+    u0, v1,
+    u0, v1,
+    u1, v0,
+    u1, v1
+  );
+
+  // Vertex color to modulate the white tile
+  const rc = r / 255;
+  const gc = g / 255;
+  const bc = b / 255;
+  const ac = a / 255;
+  batchColors.push(
+    rc, gc, bc, ac,
+    rc, gc, bc, ac,
+    rc, gc, bc, ac,
+    rc, gc, bc, ac,
+    rc, gc, bc, ac,
+    rc, gc, bc, ac
+  );
 }
 
 // Execute command buffer from WASM
 function executeRenderCommands(bufferPtr, count) {
-  const TILE_PADDING = 1;
+  batchCount = 0;
+
   const tileAtlasCols = Math.floor((tileAtlas.width - TILE_PADDING) / (TILE_SIZE + TILE_PADDING));
 
   // Command buffer layout: types[512], data[512*6]
@@ -251,29 +303,20 @@ function executeRenderCommands(bufferPtr, count) {
     const data = new Int32Array(memory.buffer, dataOffset, 6);
 
     if (type === RenderCommand.TILE) {
-      const atlasId = data[0];
+      const atlasId = data[0]; // Now ignored, everything in combined atlas
       const tileIndex = data[1];
       const x = data[2];
       const y = data[3];
       const w = data[4];
       const h = data[5];
 
-      const texture = atlasId === AtlasId.TILES ? tileAtlas : fontAtlas;
-      const cols = atlasId === AtlasId.TILES ? tileAtlasCols : 16;
+      // All tiles use same layout with padding
+      const tileX = tileIndex % tileAtlasCols;
+      const tileY = Math.floor(tileIndex / tileAtlasCols);
+      const atlasX = TILE_PADDING + tileX * (TILE_SIZE + TILE_PADDING);
+      const atlasY = TILE_PADDING + tileY * (TILE_SIZE + TILE_PADDING);
 
-      const tileX = tileIndex % cols;
-      const tileY = Math.floor(tileIndex / cols);
-
-      let atlasX, atlasY;
-      if (atlasId === AtlasId.TILES) {
-        atlasX = TILE_PADDING + tileX * (TILE_SIZE + TILE_PADDING);
-        atlasY = TILE_PADDING + tileY * (TILE_SIZE + TILE_PADDING);
-      } else {
-        atlasX = tileX * TILE_SIZE;
-        atlasY = tileY * TILE_SIZE;
-      }
-
-      drawQuad(x, y, w, h, atlasX, atlasY, TILE_SIZE, TILE_SIZE, texture);
+      batchQuad(x, y, w, h, atlasX, atlasY, TILE_SIZE, TILE_SIZE);
     } else if (type === RenderCommand.RECT) {
       const x = data[0];
       const y = data[1];
@@ -286,12 +329,17 @@ function executeRenderCommands(bufferPtr, count) {
       const b = (color >> 8) & 0xFF;
       const a = color & 0xFF;
 
-      drawRect(x, y, w, h, r, g, b, a);
+      batchRect(x, y, w, h, r, g, b, a);
     } else if (type === RenderCommand.LINE) {
       // Line rendering not yet implemented
       console.warn('Line rendering not implemented');
     }
   }
+
+  // Flush any remaining batched primitives
+  flushBatch();
+
+  console.log('Batches this frame:', batchCount);
 }
 
 // Log levels matching C enum
@@ -433,6 +481,17 @@ function gameLoop(currentTime) {
   requestAnimationFrame(gameLoop);
 }
 
+// Resize canvas to match physical pixels
+function resizeCanvas() {
+  const canvas = document.getElementById('canvas');
+  canvas.width = canvas.clientWidth;
+  canvas.height = canvas.clientHeight;
+  console.log('Resized canvas to', canvas.width, '*', canvas.height)
+  if (gl) {
+    gl.viewport(0, 0, canvas.width, canvas.height);
+  }
+}
+
 // Main initialization
 async function main() {
   const canvas = document.getElementById('canvas');
@@ -440,17 +499,20 @@ async function main() {
 
   try {
     info.textContent = 'Initializing WebGL...';
+    resizeCanvas();
     initWebGL(canvas);
 
     info.textContent = 'Loading textures...';
-    tileAtlas = loadTexture(gl, 'urizen_onebit_tileset__v2d0.png');
-    fontAtlas = loadTexture(gl, 'cp437_12x12.png');
+    tileAtlas = loadTexture(gl, 'combined_tileset.png');
 
     info.textContent = 'Loading WASM...';
     await initWasm();
 
     info.textContent = 'Setting up input...';
     setupInput();
+
+    // Handle window resize
+    window.addEventListener('resize', resizeCanvas);
 
     info.textContent = 'Running...';
     lastTime = performance.now();

@@ -7,18 +7,18 @@
 #include <stdio.h>
 
 // Game API function pointers (loaded dynamically)
-typedef void (*game_init_fn)(WorldState *world);
-typedef void (*game_frame_fn)(WorldState *world, double dt);
-typedef void (*game_render_fn)(WorldState *world, PlatformContext *platform);
-typedef void (*game_input_fn)(WorldState *world, InputCommand command);
+typedef void (*GameInitFunc)(WorldState *world);
+typedef void (*GameFrameFunc)(WorldState *world, double dt);
+typedef void (*GameRenderFunc)(WorldState *world, PlatformContext *platform);
+typedef void (*GameInputFunc)(WorldState *world, InputCommand command);
 
 typedef struct {
   void *lib_handle;
   SDL_Time lib_mtime;
-  game_init_fn game_init;
-  game_frame_fn game_frame;
-  game_render_fn game_render;
-  game_input_fn game_input;
+  GameInitFunc game_init;
+  GameFrameFunc game_frame;
+  GameRenderFunc game_render;
+  GameInputFunc game_input;
 } GameAPI;
 
 #define STB_IMAGE_IMPLEMENTATION
@@ -32,7 +32,6 @@ typedef struct {
   SDL_Window *window;
   SDL_Renderer *renderer;
   SDL_Texture *atlas_texture;
-  SDL_Texture *font_texture;
   int atlas_width;
   int atlas_height;
   int atlas_cols;
@@ -96,9 +95,8 @@ static bool init_renderer(Renderer *r) {
 
   // Load tileset with stb_image
   int channels;
-  unsigned char *image_data =
-      stbi_load("urizen_onebit_tileset__v2d0.png", &r->atlas_width,
-                &r->atlas_height, &channels, 4);
+  unsigned char *image_data = stbi_load("combined_tileset.png", &r->atlas_width,
+                                        &r->atlas_height, &channels, 4);
   if (!image_data) {
     fprintf(stderr, "Failed to load tileset: %s\n", stbi_failure_reason());
     return false;
@@ -137,38 +135,10 @@ static bool init_renderer(Renderer *r) {
 
   stbi_image_free(image_data);
 
-  // Load CP437 font
-  int font_channels;
-  unsigned char *font_data = stbi_load("cp437_12x12.png", &font_channels,
-                                       &font_channels, &font_channels, 4);
-  if (!font_data) {
-    fprintf(stderr, "Failed to load font: %s\n", stbi_failure_reason());
-    return false;
-  }
-
-  // CP437 font is 16x16 grid of 12x12 glyphs
-  r->font_texture = SDL_CreateTexture(r->renderer, SDL_PIXELFORMAT_RGBA32,
-                                      SDL_TEXTUREACCESS_STATIC, 16 * TILE_SIZE,
-                                      16 * TILE_SIZE);
-  if (!r->font_texture) {
-    fprintf(stderr, "SDL_CreateTexture failed for font: %s\n", SDL_GetError());
-    stbi_image_free(font_data);
-    return false;
-  }
-
-  SDL_UpdateTexture(r->font_texture, NULL, font_data, 16 * TILE_SIZE * 4);
-  SDL_SetTextureScaleMode(r->font_texture, SDL_SCALEMODE_NEAREST);
-  SDL_SetTextureBlendMode(r->font_texture, SDL_BLENDMODE_BLEND);
-
-  stbi_image_free(font_data);
-
   return true;
 }
 
 static void shutdown_renderer(Renderer *r) {
-  if (r->font_texture) {
-    SDL_DestroyTexture(r->font_texture);
-  }
   if (r->atlas_texture) {
     SDL_DestroyTexture(r->atlas_texture);
   }
@@ -210,13 +180,13 @@ static bool load_game_api(GameAPI *api, const char *lib_path) {
   }
 
   // Load function pointers
-  api->game_init = (game_init_fn)SDL_LoadFunction(api->lib_handle, "game_init");
+  api->game_init = (GameInitFunc)SDL_LoadFunction(api->lib_handle, "game_init");
   api->game_frame =
-      (game_frame_fn)SDL_LoadFunction(api->lib_handle, "game_frame");
+      (GameFrameFunc)SDL_LoadFunction(api->lib_handle, "game_frame");
   api->game_render =
-      (game_render_fn)SDL_LoadFunction(api->lib_handle, "game_render");
+      (GameRenderFunc)SDL_LoadFunction(api->lib_handle, "game_render");
   api->game_input =
-      (game_input_fn)SDL_LoadFunction(api->lib_handle, "game_input");
+      (GameInputFunc)SDL_LoadFunction(api->lib_handle, "game_input");
 
   if (!api->game_init || !api->game_frame || !api->game_render ||
       !api->game_input) {
@@ -251,32 +221,24 @@ static void execute_render_commands(void *impl_data,
 
     switch (buffer->types[i]) {
     case RENDER_CMD_TILE: {
-      AtlasId atlas_id = (AtlasId)data[0];
+      // data[0] is unused (was atlas_id)
       int tile_index = data[1];
       int x = data[2];
       int y = data[3];
       int w = data[4];
       int h = data[5];
 
-      // Select the appropriate texture
-      SDL_Texture *texture =
-          (atlas_id == ATLAS_TILES) ? r->atlas_texture : r->font_texture;
+      // Use combined atlas texture
+      SDL_Texture *texture = r->atlas_texture;
 
-      // Calculate tile position in atlas
-      int atlas_cols =
-          (atlas_id == ATLAS_TILES) ? r->atlas_cols : 16; // Font is 16x16
-      int tile_x = tile_index % atlas_cols;
-      int tile_y = tile_index / atlas_cols;
+      // Calculate tile position in combined atlas (all tiles use same layout
+      // with padding)
+      int tile_x = tile_index % r->atlas_cols;
+      int tile_y = tile_index / r->atlas_cols;
 
-      // Atlas position (with padding for tile atlas, no padding for font)
-      int atlas_x, atlas_y;
-      if (atlas_id == ATLAS_TILES) {
-        atlas_x = TILE_PADDING + tile_x * (TILE_SIZE + TILE_PADDING);
-        atlas_y = TILE_PADDING + tile_y * (TILE_SIZE + TILE_PADDING);
-      } else {
-        atlas_x = tile_x * TILE_SIZE;
-        atlas_y = tile_y * TILE_SIZE;
-      }
+      // Atlas position with padding
+      int atlas_x = TILE_PADDING + tile_x * (TILE_SIZE + TILE_PADDING);
+      int atlas_y = TILE_PADDING + tile_y * (TILE_SIZE + TILE_PADDING);
 
       SDL_FRect src = {
           .x = (float)atlas_x,
@@ -370,7 +332,7 @@ int main(int argc, char *argv[]) {
 
   // Load game library
   GameAPI game_api = {0};
-  const char *lib_path = "build/libgame.so";
+  const char *lib_path = "./libgame.so";
   if (!load_game_api(&game_api, lib_path)) {
     return 1;
   }
