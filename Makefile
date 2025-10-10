@@ -62,7 +62,7 @@ wasm: $(WASM_TARGET) $(COMBINED_ATLAS)
 	@echo "Web build complete. Serve $(WEB_HOST_DIR)/ with a web server."
 
 serve: wasm
-	@cd "$(WEB_HOST_DIR)"; python3 -m http.server 8000
+	python3 -m http.server 8000 --directory "$(WEB_HOST_DIR)"
 
 clean:
 	rm -rf $(BUILDDIR)
