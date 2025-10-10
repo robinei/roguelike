@@ -324,14 +324,8 @@ int main(int argc, char *argv[]) {
   bool running = true;
   SDL_Event event;
 
-  // Timing for game_tick (10 ticks per second)
-  uint64_t tick_counter = 0;
-  uint64_t last_tick_time = SDL_GetTicksNS();
-  const uint64_t tick_interval_ns = 100000000; // 100ms = 0.1s
-
+  // Timing for frames
   uint64_t last_frame_time = SDL_GetTicksNS();
-  uint64_t frame_count = 0;
-  uint64_t fps_report_time = SDL_GetTicksNS();
 
   while (running) {
     uint64_t current_time = SDL_GetTicksNS();
@@ -402,23 +396,6 @@ int main(int argc, char *argv[]) {
       }
     }
 
-    // Call game_tick at 10 Hz
-    while (current_time - last_tick_time >= tick_interval_ns) {
-      game_tick(&world, tick_counter);
-      tick_counter++;
-      last_tick_time += tick_interval_ns;
-
-      // Print FPS every 10 ticks (once per second)
-      if (tick_counter % 10 == 0) {
-        double elapsed_sec = (current_time - fps_report_time) / 1000000000.0;
-        double fps = frame_count / elapsed_sec;
-        // printf("FPS: %.1f\n", fps);
-        (void)fps; // Suppress unused warning
-        frame_count = 0;
-        fps_report_time = current_time;
-      }
-    }
-
     // Call game_frame every frame
     double dt = (current_time - last_frame_time) /
                 1000000000.0; // Convert ns to seconds
@@ -444,7 +421,6 @@ int main(int argc, char *argv[]) {
 
     // Present
     SDL_RenderPresent(renderer.renderer);
-    frame_count++;
   }
 
   shutdown_renderer(&renderer);

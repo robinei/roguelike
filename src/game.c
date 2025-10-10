@@ -84,8 +84,9 @@ void game_init(WorldState *world) {
   output_message("Roll for initiative!");
 }
 
-void game_tick(WorldState *world, uint64_t tick) {
+static void game_tick(WorldState *world, uint64_t tick) {
   active_world = world;
+  (void)tick; // Unused for now
   particle_emit_system_tick();
 }
 
@@ -138,6 +139,19 @@ static void process_npc_turn(EntityIndex entity) {
 
 void game_frame(WorldState *world, double dt) {
   active_world = world;
+
+  // Accumulate time and trigger ticks at 10Hz
+  static double tick_accumulator = 0.0;
+  static uint64_t tick_counter = 0;
+
+  tick_accumulator += dt;
+  const double TICK_INTERVAL = 0.1; // 100ms = 10Hz
+
+  while (tick_accumulator >= TICK_INTERVAL) {
+    game_tick(world, tick_counter++);
+    tick_accumulator -= TICK_INTERVAL;
+  }
+
   particles_update(dt);
 
   // Advance action animation
