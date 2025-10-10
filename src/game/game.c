@@ -3,6 +3,7 @@
 #include "common.h"
 #include "components.h"
 #include "particles.h"
+#include "prnf.h"
 #include "random.h"
 #include "render_api.h"
 #include "turn_queue.h"
@@ -139,6 +140,15 @@ static void process_npc_turn(EntityIndex entity) {
 
 void game_frame(WorldState *world, double dt) {
   active_world = world;
+
+  // FPS calculation (update every second)
+  WORLD.frame_time_accumulator += dt;
+  WORLD.frame_count++;
+  if (WORLD.frame_time_accumulator >= 1.0) {
+    WORLD.fps = WORLD.frame_count / WORLD.frame_time_accumulator;
+    WORLD.frame_time_accumulator = 0.0;
+    WORLD.frame_count = 0;
+  }
 
   // tick handling
   WORLD.tick_accumulator += dt;
@@ -337,20 +347,15 @@ void game_render(WorldState *world, PlatformContext *platform) {
     int y = platform->viewport_height_px -
             (messages_to_show - i) * platform->tile_size;
 
-    // Draw each character with semi-transparent background
-    int x = 0;
-    for (const char *p = text; *p; p++) {
-      // Draw background rect for this glyph
-      cmdbuf_rect(&cmd_buf, platform, x, y, platform->tile_size,
-                  platform->tile_size, RGBA(0, 0, 0, 192));
+    cmdbuf_text(&cmd_buf, platform, 0, y, TEXT_ALIGN_LEFT, RGBA(0, 0, 0, 192),
+                "%s", text);
+  }
 
-      // Draw the character glyph (glyphs start at FONT_BASE_INDEX in combined atlas)
-      unsigned char ch = (unsigned char)*p;
-      cmdbuf_tile(&cmd_buf, platform, FONT_BASE_INDEX + ch, x, y,
-                  platform->tile_size, platform->tile_size);
-
-      x += platform->tile_size;
-    }
+  // Draw FPS in upper right corner
+  if (WORLD.fps > 0.0f) {
+    cmdbuf_text(&cmd_buf, platform, platform->viewport_width_px, 0,
+                TEXT_ALIGN_RIGHT, RGBA(0, 0, 0, 192), "%.1f FPS",
+                (double)WORLD.fps);
   }
 
   // Flush any remaining commands
@@ -358,6 +363,8 @@ void game_render(WorldState *world, PlatformContext *platform) {
 }
 
 #ifdef __wasm__
+// WASM-friendly render function that takes viewport dimensions directly
+// and uses the imported execute_render_commands function
 // Imported from JavaScript
 extern void execute_render_commands(void *impl_data,
                                     const CommandBuffer *buffer);

@@ -86,3 +86,14 @@ void cmdbuf_rect(CommandBuffer *buf, PlatformContext *ctx, int x, int y, int w,
 // LINE: x0, y0, x1, y1, color (5 ints)
 void cmdbuf_line(CommandBuffer *buf, PlatformContext *ctx, int x0, int y0,
                  int x1, int y1, uint32_t color);
+
+// Text rendering alignment
+typedef enum {
+  TEXT_ALIGN_LEFT,
+  TEXT_ALIGN_RIGHT,
+} TextAlign;
+
+// Draw formatted text with optional background
+// If bg_color alpha is 0, no background is drawn
+void cmdbuf_text(CommandBuffer *buf, PlatformContext *ctx, int x, int y,
+                 TextAlign align, uint32_t bg_color, const char *fmt, ...);

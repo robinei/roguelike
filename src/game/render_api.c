@@ -1,4 +1,5 @@
 #include "render_api.h"
+#include "prnf.h"
 
 void cmdbuf_clear(CommandBuffer *buf) { buf->count = 0; }
 
@@ -59,4 +60,36 @@ void cmdbuf_line(CommandBuffer *buf, PlatformContext *ctx, int x0, int y0,
   buf->data[idx * 6 + 4] = (int32_t)color;
   buf->data[idx * 6 + 5] = 0; // Unused
   buf->count++;
+}
+
+void cmdbuf_text(CommandBuffer *buf, PlatformContext *ctx, int x, int y,
+                 TextAlign align, uint32_t bg_color, const char *fmt, ...) {
+  char text[256];
+  va_list args;
+  va_start(args, fmt);
+  vsnprnf(text, sizeof(text), fmt, args);
+  va_end(args);
+
+  // Calculate text width
+  int text_width = 0;
+  for (const char *p = text; *p; p++) {
+    text_width += ctx->tile_size;
+  }
+
+  // Adjust x for right alignment
+  int draw_x = (align == TEXT_ALIGN_RIGHT) ? (x - text_width) : x;
+
+  // Draw background if alpha > 0
+  if ((bg_color & 0xFF) > 0) {
+    cmdbuf_rect(buf, ctx, draw_x, y, text_width, ctx->tile_size, bg_color);
+  }
+
+  // Draw text
+  int char_x = draw_x;
+  for (const char *p = text; *p; p++) {
+    unsigned char ch = (unsigned char)*p;
+    cmdbuf_tile(buf, ctx, FONT_BASE_INDEX + ch, char_x, y, ctx->tile_size,
+                ctx->tile_size);
+    char_x += ctx->tile_size;
+  }
 }

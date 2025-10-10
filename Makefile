@@ -39,7 +39,7 @@ HOSTBIN_TARGET = $(BUILDDIR)/$(HOSTBIN_NAME)
 # ============================================================================
 WEB_HOST_DIR = $(BUILDDIR)/web
 COMBINED_ATLAS = $(BUILDDIR)/combined_tileset.png
-WEB_HOST_SOURCES = src/web_host/index.html src/web_host/game.js
+WEB_HOST_SOURCES = src/web_host/index.html src/web_host/game.js src/web_host/favicon.ico
 
 # ============================================================================
 # Phony targets

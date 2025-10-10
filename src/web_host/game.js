@@ -165,7 +165,6 @@ function loadTexture(gl, url) {
 let batchPositions = [];
 let batchTexCoords = [];
 let batchColors = [];
-let batchCount = 0;
 
 // Flush current batch to GPU
 function flushBatch() {
@@ -191,7 +190,6 @@ function flushBatch() {
   gl.bindTexture(gl.TEXTURE_2D, tileAtlas);
 
   gl.drawArrays(gl.TRIANGLES, 0, vertexCount);
-  batchCount++;
 
   // Clear batch
   batchPositions = [];
@@ -249,10 +247,10 @@ function batchRect(x, y, w, h, r, g, b, a) {
 
   const texWidth = tileAtlas.width || 1;
   const texHeight = tileAtlas.height || 1;
-  const u0 = atlasX / texWidth;
-  const v0 = atlasY / texHeight;
-  const u1 = (atlasX + TILE_SIZE) / texWidth;
-  const v1 = (atlasY + TILE_SIZE) / texHeight;
+
+  // Sample just the center pixel of the white tile to avoid edge artifacts
+  const uCenter = (atlasX + TILE_SIZE / 2) / texWidth;
+  const vCenter = (atlasY + TILE_SIZE / 2) / texHeight;
 
   batchPositions.push(
     x, y,
@@ -263,13 +261,14 @@ function batchRect(x, y, w, h, r, g, b, a) {
     x + w, y + h
   );
 
+  // Use center pixel for all vertices to get solid color
   batchTexCoords.push(
-    u0, v0,
-    u1, v0,
-    u0, v1,
-    u0, v1,
-    u1, v0,
-    u1, v1
+    uCenter, vCenter,
+    uCenter, vCenter,
+    uCenter, vCenter,
+    uCenter, vCenter,
+    uCenter, vCenter,
+    uCenter, vCenter
   );
 
   // Vertex color to modulate the white tile
@@ -289,8 +288,6 @@ function batchRect(x, y, w, h, r, g, b, a) {
 
 // Execute command buffer from WASM
 function executeRenderCommands(bufferPtr, count) {
-  batchCount = 0;
-
   const tileAtlasCols = Math.floor((tileAtlas.width - TILE_PADDING) / (TILE_SIZE + TILE_PADDING));
 
   // Command buffer layout: types[512], data[512*6]
@@ -338,8 +335,6 @@ function executeRenderCommands(bufferPtr, count) {
 
   // Flush any remaining batched primitives
   flushBatch();
-
-  console.log('Batches this frame:', batchCount);
 }
 
 // Log levels matching C enum
@@ -423,7 +418,6 @@ async function initWasm() {
   worldStatePtr = 0;
 
   console.log('WASM module loaded');
-  console.log('Exported functions:', Object.keys(wasmExports));
 
   // Initialize the game
   wasmExports.game_init(worldStatePtr);

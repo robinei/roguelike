@@ -16,10 +16,3 @@ void game_frame(WorldState *world, double dt);
 
 // render the game state using the provided platform context
 void game_render(WorldState *world, PlatformContext *platform);
-
-#ifdef __wasm__
-// WASM-friendly render function that takes viewport dimensions directly
-// and uses the imported execute_render_commands function
-void game_render_wasm(WorldState *world, int viewport_width_px,
-                      int viewport_height_px, int tile_size);
-#endif

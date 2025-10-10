@@ -1,5 +1,4 @@
 #include "world.h"
-#include <stdarg.h>
 
 #define PRNF_SUPPORT_FLOAT
 #define PRNF_SUPPORT_DOUBLE

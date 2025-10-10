@@ -159,6 +159,11 @@ typedef struct {
   // time scheduling porposes)
   double tick_accumulator;
   uint64_t tick_counter;
+
+  // FPS tracking
+  double frame_time_accumulator;
+  uint32_t frame_count;
+  float fps;
 } WorldState;
 
 extern WorldState *active_world;
