@@ -1,6 +1,14 @@
 #include "world.h"
 #include <stdarg.h>
-#include <stdio.h>
+
+#define PRNF_SUPPORT_FLOAT
+#define PRNF_SUPPORT_DOUBLE
+#define PRNF_SUPPORT_LONG_LONG
+#define PRNF_ENG_PREC_DEFAULT 0
+#define PRNF_FLOAT_PREC_DEFAULT 3
+#define PRNF_COL_ALIGNMENT
+#define PRNF_IMPLEMENTATION
+#include "prnf.h"
 
 // declare global WorldState pointer
 WorldState *active_world;
@@ -20,7 +28,7 @@ void output_message(const char *fmt, ...) {
   uint32_t pos =
       (WORLD.messages_first + WORLD.messages_count - 1) % MESSAGE_COUNT_MAX;
   Message *msg = &WORLD.messages[pos];
-  msg->length = vsnprintf(msg->text, MESSAGE_LENGTH_MAX + 1, fmt, args);
+  msg->length = vsnprnf(msg->text, MESSAGE_LENGTH_MAX + 1, fmt, args);
   if (msg->length > MESSAGE_LENGTH_MAX) {
     msg->length = MESSAGE_LENGTH_MAX;
   }

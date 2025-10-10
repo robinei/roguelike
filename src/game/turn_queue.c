@@ -1,6 +1,4 @@
 #include "world.h"
-#include <stdio.h>
-#include <string.h>
 
 // ============================================================================
 // Turn queue implementation (min-heap on turn_schedule[e].delay)
@@ -137,11 +135,11 @@ void turn_queue_debug_print() {
   TurnSchedule saved_schedule[MAX_ENTITIES];
   memcpy(saved_schedule, WORLD.turn_schedule, sizeof(saved_schedule));
 
-  printf("Turn queue (%d entities):\n", WORLD.turn_queue.count);
+  output_message("Turn queue (%d entities):\n", WORLD.turn_queue.count);
   while (WORLD.turn_queue.count > 0) {
     EntityHandle h = turn_queue_pop();
     EntityIndex e = entity_handle_to_index(h);
-    printf("  Entity %d: delay=%d\n", e, WORLD.turn_schedule[e].delay);
+    output_message("  Entity %d: delay=%d\n", e, WORLD.turn_schedule[e].delay);
   }
 
   // Restore queue and turn_schedule component array

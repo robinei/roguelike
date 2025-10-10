@@ -7,7 +7,6 @@
 #include "render_api.h"
 #include "turn_queue.h"
 #include "world.h"
-#include <math.h>
 
 static void particle_emit_system_tick() {
   world_query(i, BITS(particle_emitter)) {

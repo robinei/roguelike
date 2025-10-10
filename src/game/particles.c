@@ -1,7 +1,5 @@
-#include "particles.h"
 #include "random.h"
-#include <assert.h>
-#include <math.h>
+#include "world.h"
 #include <stdint.h>
 
 #define PI 3.14159265f

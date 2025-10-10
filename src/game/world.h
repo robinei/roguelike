@@ -4,7 +4,6 @@
 #include "components.h"
 #include "particles.h"
 #include "turn_queue.h"
-#include <assert.h>
 
 #define TURN_INTERVAL 100
 

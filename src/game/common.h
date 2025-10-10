@@ -2,7 +2,26 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+
+// For freestanding WASM builds, use compiler builtins instead of libc
+#ifdef __wasm__
+#define sqrtf __builtin_sqrt
+#define sinf __builtin_sin
+#define cosf __builtin_cos
+#define atan2f __builtin_atan2
+#define memcpy __builtin_memcpy
+#define memset __builtin_memset
+// Simple assert for WASM builds - just trap on failure
+#define assert(x)                                                              \
+  do {                                                                         \
+    if (!(x))                                                                  \
+      __builtin_trap();                                                        \
+  } while (0)
+#else
+#include <assert.h>
+#include <math.h>
 #include <string.h>
+#endif
 
 #define MAX_ENTITIES 4096
 
