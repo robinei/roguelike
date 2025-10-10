@@ -1,11 +1,25 @@
+#include "../game/render_api.h"
+#include "../game/world.h"
 #include "atlas_view.h"
-#include "game.h"
-#include "render_api.h"
-#include "world.h"
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_keycode.h>
 #include <stdbool.h>
 #include <stdio.h>
+
+// Game API function pointers (loaded dynamically)
+typedef void (*game_init_fn)(WorldState *world);
+typedef void (*game_frame_fn)(WorldState *world, double dt);
+typedef void (*game_render_fn)(WorldState *world, PlatformContext *platform);
+typedef void (*game_input_fn)(WorldState *world, InputCommand command);
+
+typedef struct {
+  void *lib_handle;
+  SDL_Time lib_mtime;
+  game_init_fn game_init;
+  game_frame_fn game_frame;
+  game_render_fn game_render;
+  game_input_fn game_input;
+} GameAPI;
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
@@ -49,23 +63,16 @@ static bool init_renderer(Renderer *r) {
     return false;
   }
 
-  // Get native display resolution
-  SDL_DisplayID display_id = SDL_GetPrimaryDisplay();
-  const SDL_DisplayMode *mode = SDL_GetDesktopDisplayMode(display_id);
-  if (!mode) {
-    fprintf(stderr, "SDL_GetDesktopDisplayMode failed: %s\n", SDL_GetError());
-    return false;
-  }
+  // Create windowed mode for development (1280x720)
+  r->window_width = 1280;
+  r->window_height = 720;
 
-  r->window_width = mode->w;
-  r->window_height = mode->h;
+  printf("Window size: %dx%d\n", r->window_width, r->window_height);
 
-  printf("Display resolution: %dx%d\n", r->window_width, r->window_height);
-
-  // Create borderless fullscreen window with high DPI support
+  // Create resizable windowed window with high DPI support
   r->window =
       SDL_CreateWindow("Roguelike", r->window_width, r->window_height,
-                       SDL_WINDOW_BORDERLESS | SDL_WINDOW_HIGH_PIXEL_DENSITY);
+                       SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
   if (!r->window) {
     fprintf(stderr, "SDL_CreateWindow failed: %s\n", SDL_GetError());
     return false;
@@ -172,6 +179,57 @@ static void shutdown_renderer(Renderer *r) {
     SDL_DestroyWindow(r->window);
   }
   SDL_Quit();
+}
+
+// Load or reload the game library
+static bool load_game_api(GameAPI *api, const char *lib_path) {
+  // Get current mtime
+  SDL_PathInfo path_info;
+  if (!SDL_GetPathInfo(lib_path, &path_info)) {
+    fprintf(stderr, "Failed to stat %s: %s\n", lib_path, SDL_GetError());
+    return false;
+  }
+
+  // Check if we need to reload
+  if (api->lib_handle && path_info.modify_time == api->lib_mtime) {
+    return true; // Already loaded and up to date
+  }
+
+  // Unload old library if present
+  if (api->lib_handle) {
+    printf("Reloading game library...\n");
+    SDL_UnloadObject(api->lib_handle);
+    api->lib_handle = NULL;
+  }
+
+  // Load the library
+  api->lib_handle = SDL_LoadObject(lib_path);
+  if (!api->lib_handle) {
+    fprintf(stderr, "Failed to load %s: %s\n", lib_path, SDL_GetError());
+    return false;
+  }
+
+  // Load function pointers
+  api->game_init = (game_init_fn)SDL_LoadFunction(api->lib_handle, "game_init");
+  api->game_frame =
+      (game_frame_fn)SDL_LoadFunction(api->lib_handle, "game_frame");
+  api->game_render =
+      (game_render_fn)SDL_LoadFunction(api->lib_handle, "game_render");
+  api->game_input =
+      (game_input_fn)SDL_LoadFunction(api->lib_handle, "game_input");
+
+  if (!api->game_init || !api->game_frame || !api->game_render ||
+      !api->game_input) {
+    fprintf(stderr, "Failed to load game functions: %s\n", SDL_GetError());
+    SDL_UnloadObject(api->lib_handle);
+    api->lib_handle = NULL;
+    return false;
+  }
+
+  api->lib_mtime = path_info.modify_time;
+  printf("Game library loaded successfully (mtime: %lld)\n",
+         (long long)api->lib_mtime);
+  return true;
 }
 
 // Extract RGBA components from packed color
@@ -310,6 +368,13 @@ int main(int argc, char *argv[]) {
   (void)argc;
   (void)argv;
 
+  // Load game library
+  GameAPI game_api = {0};
+  const char *lib_path = "build/libgame.so";
+  if (!load_game_api(&game_api, lib_path)) {
+    return 1;
+  }
+
   Renderer renderer = {
       .scale = 2, // Default 2x scaling
   };
@@ -319,7 +384,7 @@ int main(int argc, char *argv[]) {
 
   // Initialize world
   WorldState world = {0};
-  game_init(&world);
+  game_api.game_init(&world);
 
   bool running = true;
   SDL_Event event;
@@ -339,6 +404,16 @@ int main(int argc, char *argv[]) {
 
       case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
         running = false;
+        break;
+
+      case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+        SDL_GetWindowSizeInPixels(renderer.window, &renderer.window_width,
+                                  &renderer.window_height);
+        recalculate_viewport(&renderer);
+        printf("Window resized to %dx%d pixels (%dx%d tiles at %dx scale)\n",
+               renderer.window_width, renderer.window_height,
+               renderer.viewport_tiles_x, renderer.viewport_tiles_y,
+               renderer.scale);
         break;
 
       case SDL_EVENT_KEY_DOWN:
@@ -387,7 +462,7 @@ int main(int argc, char *argv[]) {
 
         InputCommand cmd = map_key_to_command(event.key.key);
         if (cmd != INPUT_CMD_NONE) {
-          game_input(&world, cmd);
+          game_api.game_input(&world, cmd);
         }
         break;
 
@@ -396,11 +471,14 @@ int main(int argc, char *argv[]) {
       }
     }
 
+    // Check for hot-reload (every frame)
+    load_game_api(&game_api, lib_path);
+
     // Call game_frame every frame
     double dt = (current_time - last_frame_time) /
                 1000000000.0; // Convert ns to seconds
     last_frame_time = current_time;
-    game_frame(&world, dt);
+    game_api.game_frame(&world, dt);
 
     // Render
     // Clear to black
@@ -417,12 +495,16 @@ int main(int argc, char *argv[]) {
     };
 
     // Call game render
-    game_render(&world, &platform);
+    game_api.game_render(&world, &platform);
 
     // Present
     SDL_RenderPresent(renderer.renderer);
   }
 
+  // Cleanup
+  if (game_api.lib_handle) {
+    SDL_UnloadObject(game_api.lib_handle);
+  }
   shutdown_renderer(&renderer);
   return 0;
 }

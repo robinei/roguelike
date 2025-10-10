@@ -113,6 +113,7 @@ static void execute_player_action(InputCommand command) {
   switch (command) {
   case INPUT_CMD_PERIOD:
     // Wait - costs normal turn
+    turn_queue_add_delay(player, TURN_INTERVAL);
     break;
 
   case INPUT_CMD_UP:

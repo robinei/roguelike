@@ -6,14 +6,134 @@
       "-Wall",
       "-Wextra",
       "-g",
+      "-fPIC",
       "-c",
       "-o",
-      "build/src/world.o",
-      "src/world.c"
+      "build/src/game/actions/combat.o",
+      "src/game/actions/combat.c"
     ],
     "directory": "/home/robin/Code/roguelike",
-    "file": "/home/robin/Code/roguelike/src/world.c",
-    "output": "/home/robin/Code/roguelike/build/src/world.o"
+    "file": "/home/robin/Code/roguelike/src/game/actions/combat.c",
+    "output": "/home/robin/Code/roguelike/build/src/game/actions/combat.o"
+  },
+  {
+    "arguments": [
+      "/usr/bin/clang",
+      "-std=c99",
+      "-Wall",
+      "-Wextra",
+      "-g",
+      "-fPIC",
+      "-c",
+      "-o",
+      "build/src/game/actions/move.o",
+      "src/game/actions/move.c"
+    ],
+    "directory": "/home/robin/Code/roguelike",
+    "file": "/home/robin/Code/roguelike/src/game/actions/move.c",
+    "output": "/home/robin/Code/roguelike/build/src/game/actions/move.o"
+  },
+  {
+    "arguments": [
+      "/usr/bin/clang",
+      "-std=c99",
+      "-Wall",
+      "-Wextra",
+      "-g",
+      "-fPIC",
+      "-c",
+      "-o",
+      "build/src/game/particles.o",
+      "src/game/particles.c"
+    ],
+    "directory": "/home/robin/Code/roguelike",
+    "file": "/home/robin/Code/roguelike/src/game/particles.c",
+    "output": "/home/robin/Code/roguelike/build/src/game/particles.o"
+  },
+  {
+    "arguments": [
+      "/usr/bin/clang",
+      "-std=c99",
+      "-Wall",
+      "-Wextra",
+      "-g",
+      "-fPIC",
+      "-c",
+      "-o",
+      "build/src/game/render_api.o",
+      "src/game/render_api.c"
+    ],
+    "directory": "/home/robin/Code/roguelike",
+    "file": "/home/robin/Code/roguelike/src/game/render_api.c",
+    "output": "/home/robin/Code/roguelike/build/src/game/render_api.o"
+  },
+  {
+    "arguments": [
+      "/usr/bin/clang",
+      "-std=c99",
+      "-Wall",
+      "-Wextra",
+      "-g",
+      "-fPIC",
+      "-c",
+      "-o",
+      "build/src/game/splitmix64.o",
+      "src/game/splitmix64.c"
+    ],
+    "directory": "/home/robin/Code/roguelike",
+    "file": "/home/robin/Code/roguelike/src/game/splitmix64.c",
+    "output": "/home/robin/Code/roguelike/build/src/game/splitmix64.o"
+  },
+  {
+    "arguments": [
+      "/usr/bin/clang",
+      "-std=c99",
+      "-Wall",
+      "-Wextra",
+      "-g",
+      "-fPIC",
+      "-c",
+      "-o",
+      "build/src/game/turn_queue.o",
+      "src/game/turn_queue.c"
+    ],
+    "directory": "/home/robin/Code/roguelike",
+    "file": "/home/robin/Code/roguelike/src/game/turn_queue.c",
+    "output": "/home/robin/Code/roguelike/build/src/game/turn_queue.o"
+  },
+  {
+    "arguments": [
+      "/usr/bin/clang",
+      "-std=c99",
+      "-Wall",
+      "-Wextra",
+      "-g",
+      "-fPIC",
+      "-c",
+      "-o",
+      "build/src/game/world.o",
+      "src/game/world.c"
+    ],
+    "directory": "/home/robin/Code/roguelike",
+    "file": "/home/robin/Code/roguelike/src/game/world.c",
+    "output": "/home/robin/Code/roguelike/build/src/game/world.o"
+  },
+  {
+    "arguments": [
+      "/usr/bin/clang",
+      "-std=c99",
+      "-Wall",
+      "-Wextra",
+      "-g",
+      "-fPIC",
+      "-c",
+      "-o",
+      "build/src/game/game.o",
+      "src/game/game.c"
+    ],
+    "directory": "/home/robin/Code/roguelike",
+    "file": "/home/robin/Code/roguelike/src/game/game.c",
+    "output": "/home/robin/Code/roguelike/build/src/game/game.o"
   },
   {
     "arguments": [
@@ -24,12 +144,12 @@
       "-g",
       "-c",
       "-o",
-      "build/src/particles.o",
-      "src/particles.c"
+      "build/src/sdl3_host/atlas_view.o",
+      "src/sdl3_host/atlas_view.c"
     ],
     "directory": "/home/robin/Code/roguelike",
-    "file": "/home/robin/Code/roguelike/src/particles.c",
-    "output": "/home/robin/Code/roguelike/build/src/particles.o"
+    "file": "/home/robin/Code/roguelike/src/sdl3_host/atlas_view.c",
+    "output": "/home/robin/Code/roguelike/build/src/sdl3_host/atlas_view.o"
   },
   {
     "arguments": [
@@ -40,11 +160,11 @@
       "-g",
       "-c",
       "-o",
-      "build/src/main.o",
-      "src/main.c"
+      "build/src/sdl3_host/main.o",
+      "src/sdl3_host/main.c"
     ],
     "directory": "/home/robin/Code/roguelike",
-    "file": "/home/robin/Code/roguelike/src/main.c",
-    "output": "/home/robin/Code/roguelike/build/src/main.o"
+    "file": "/home/robin/Code/roguelike/src/sdl3_host/main.c",
+    "output": "/home/robin/Code/roguelike/build/src/sdl3_host/main.o"
   }
 ]
