@@ -2,6 +2,7 @@
 
 #include "common.h"
 #include "components.h"
+#include "particles.h"
 #include "turn_queue.h"
 #include <assert.h>
 
@@ -136,13 +137,29 @@ typedef struct {
   uint32_t messages_first;
 
   TurnQueue turn_queue;
+
   EntityHandle turn_entity; // special entity which only exists to be inserted
                             // into the turn queue at regular intervals, and for
                             // which per-turn login is performed when popped
   EntityHandle player;
+
+  // particle state
+  float particle_time;
+  uint32_t particle_count;
+  Particle particles[MAX_PARTICLES];
+
   Map map;
+
   ActionAnim anim;
+
   InputCommand next_player_input; // Next input to execute for player
+
+  uint64_t rng_state;
+
+  // state for tracking ticks (which happen at 10Hz and is used for some real
+  // time scheduling porposes)
+  double tick_accumulator;
+  uint64_t tick_counter;
 } WorldState;
 
 extern WorldState *active_world;

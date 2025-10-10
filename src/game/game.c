@@ -3,8 +3,8 @@
 #include "common.h"
 #include "components.h"
 #include "particles.h"
+#include "random.h"
 #include "render_api.h"
-#include "splitmix64.h"
 #include "turn_queue.h"
 #include "world.h"
 #include <math.h>
@@ -135,22 +135,18 @@ static void execute_player_action(InputCommand command) {
 static void process_npc_turn(EntityIndex entity) {
   // TODO: AI logic for NPCs
   // For now, just wait
-  action_move(entity, splitmix64_next() % 8);
+  action_move(entity, random64() % 8);
 }
 
 void game_frame(WorldState *world, double dt) {
   active_world = world;
 
-  // Accumulate time and trigger ticks at 10Hz
-  static double tick_accumulator = 0.0;
-  static uint64_t tick_counter = 0;
-
-  tick_accumulator += dt;
+  // tick handling
+  WORLD.tick_accumulator += dt;
   const double TICK_INTERVAL = 0.1; // 100ms = 10Hz
-
-  while (tick_accumulator >= TICK_INTERVAL) {
-    game_tick(world, tick_counter++);
-    tick_accumulator -= TICK_INTERVAL;
+  while (WORLD.tick_accumulator >= TICK_INTERVAL) {
+    game_tick(world, WORLD.tick_counter++);
+    WORLD.tick_accumulator -= TICK_INTERVAL;
   }
 
   particles_update(dt);
@@ -168,7 +164,6 @@ void game_frame(WorldState *world, double dt) {
   }
 
   // If no animation playing, process the turn queue
-  // Don't start new animation same frame as completion to avoid snap
   if (WORLD.anim.type == ACTION_ANIM_NONE && WORLD.turn_queue.count > 0) {
     EntityHandle next = turn_queue_peek();
 
@@ -198,8 +193,7 @@ void game_input(WorldState *world, InputCommand command) {
 void game_render(WorldState *world, PlatformContext *platform) {
   active_world = world;
 
-  static CommandBuffer cmd_buf;
-  cmdbuf_clear(&cmd_buf);
+  CommandBuffer cmd_buf = {0};
 
   // Get player position for camera centering
   EntityIndex player_idx = entity_handle_to_index(world->player);

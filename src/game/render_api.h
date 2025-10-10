@@ -36,9 +36,9 @@ typedef enum {
 #define COMMAND_BUFFER_CAPACITY 512
 
 typedef struct {
+  int count;
   uint8_t types[COMMAND_BUFFER_CAPACITY];
   int32_t data[COMMAND_BUFFER_CAPACITY * 6]; // Max 6 ints per command
-  int count;
 } CommandBuffer;
 
 // ============================================================================

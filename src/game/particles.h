@@ -1,5 +1,7 @@
 #pragma once
 
+#define MAX_PARTICLES 1024
+
 typedef enum {
   PARTICLE_TYPE_BLOOD,
   PARTICLE_TYPE_FOG,

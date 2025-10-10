@@ -1,22 +1,18 @@
 #include "particles.h"
-#include "splitmix64.h"
+#include "random.h"
 #include <assert.h>
 #include <math.h>
 #include <stdint.h>
 
-#define MAX_PARTICLES 1024
 #define PI 3.14159265f
 
-static uint32_t particle_count = 0;
-static Particle particles[MAX_PARTICLES];
-
 static float randf(float min, float max) {
-  return min + (max - min) * splitmix64_nextf();
+  return min + (max - min) * randomf();
 }
 
 static int randi(int min, int max) {
   // Random integer in [min, max] (inclusive)
-  return min + (int)(splitmix64_next() % (uint64_t)(max - min + 1));
+  return min + (int)(random64() % (uint64_t)(max - min + 1));
 }
 
 // Get type-specific TTL (correlated with expected travel distance)
@@ -60,7 +56,7 @@ int particles_gen_spawn_interval(ParticleType type) {
 
 void particles_spawn_directed(ParticleType type, float x, float y, float dx,
                               float dy) {
-  if (particle_count >= MAX_PARTICLES) {
+  if (WORLD.particle_count >= MAX_PARTICLES) {
     return;
   }
 
@@ -114,13 +110,13 @@ void particles_spawn_directed(ParticleType type, float x, float y, float dx,
     break;
   }
 
-  particles[particle_count++] = (Particle){.type = type,
-                                           .x = x,
-                                           .y = y,
-                                           .vx = vx,
-                                           .vy = vy,
-                                           .ttl = ttl,
-                                           .lifetime = ttl};
+  WORLD.particles[WORLD.particle_count++] = (Particle){.type = type,
+                                                       .x = x,
+                                                       .y = y,
+                                                       .vx = vx,
+                                                       .vy = vy,
+                                                       .ttl = ttl,
+                                                       .lifetime = ttl};
 }
 
 void particles_spawn(ParticleType type, float x, float y) {
@@ -128,19 +124,18 @@ void particles_spawn(ParticleType type, float x, float y) {
 }
 
 static void particles_unspawn(uint32_t i) {
-  if (i == particle_count - 1) {
-    --particle_count;
+  if (i == WORLD.particle_count - 1) {
+    --WORLD.particle_count;
   } else {
-    particles[i] = particles[--particle_count];
+    WORLD.particles[i] = WORLD.particles[--WORLD.particle_count];
   }
 }
 
 void particles_update(float dt) {
-  static float time = 0;
-  time += dt;
+  WORLD.particle_time += dt;
 
-  for (uint32_t i = 0; i < particle_count; ++i) {
-    Particle *p = particles + i;
+  for (uint32_t i = 0; i < WORLD.particle_count; ++i) {
+    Particle *p = WORLD.particles + i;
     p->ttl -= dt;
     if (p->ttl <= 0) {
       particles_unspawn(i);
@@ -162,15 +157,15 @@ void particles_update(float dt) {
       break;
     case PARTICLE_TYPE_FOG:
       // Fog drifts with sinusoidal wobble
-      p->vx = 0.3f * sinf(time * 1.5f + (float)i * 0.3f);
+      p->vx = 0.3f * sinf(WORLD.particle_time * 1.5f + (float)i * 0.3f);
       break;
     case PARTICLE_TYPE_SNOW:
       // Snow wobbles side to side while falling (sine wave)
-      p->vx = 0.5f * sinf(time * 2.0f + (float)i * 0.5f);
+      p->vx = 0.5f * sinf(WORLD.particle_time * 2.0f + (float)i * 0.5f);
       break;
     case PARTICLE_TYPE_TORCH_SMOKE:
       // Smoke wobbles as it rises
-      p->vx = 0.4f * sinf(time * 2.5f + (float)i * 0.2f);
+      p->vx = 0.4f * sinf(WORLD.particle_time * 2.5f + (float)i * 0.2f);
       p->vy *= 0.98f; // slight deceleration
       break;
     case PARTICLE_TYPE_RAIN:
