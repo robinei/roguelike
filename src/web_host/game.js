@@ -280,16 +280,16 @@ async function initWasm() {
   const wasmModule = await WebAssembly.instantiate(wasmBytes, wasmImports);
 
   wasmExports = wasmModule.instance.exports;
+  heapBase = wasmExports.get_heap_base();
 
-  // Allocate WorldState after WASM static data
-  // Static GeometryBuilder (~128KB) + other statics means we need to start higher
-  // Use 1MB offset to be safe
-  worldStatePtr = 1024 * 1024;
+  worldStatePtr = heapBase;
 
-  console.log('WASM module loaded');
+  console.log('WASM module loaded. Heap base:', heapBase);
 
   // Initialize the game
-  wasmExports.game_init(worldStatePtr);
+  const rngSeed = BigInt(Math.floor(Math.random() * 0xffffffff));
+  console.log('RNG seed:', rngSeed)
+  wasmExports.game_init(worldStatePtr, rngSeed);
 
   return wasmExports;
 }

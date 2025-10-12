@@ -13,10 +13,10 @@
 #define WHITE_TILE_INDEX 10711
 
 typedef enum {
-  TILE_FLOOR = 0,
-  TILE_WALL = 1,
-  TILE_PLAYER = 2884,
-  TILE_DOOR = 50,
+  TILE_FLOOR = 1042,
+  TILE_WALL = 618,
+  TILE_PLAYER = 113,
+  TILE_DOOR = 206,
   // Add more as needed based on the tileset
 } TileType;
 

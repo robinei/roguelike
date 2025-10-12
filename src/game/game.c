@@ -2,6 +2,8 @@
 #include "actions/actions.h"
 #include "common.h"
 #include "components.h"
+#include "map.h"
+#include "mapgen/mapgen.h"
 #include "particles.h"
 #include "prnf.h"
 #include "random.h"
@@ -29,24 +31,38 @@ static void particle_emit_system_tick() {
   }
 }
 
-static EntityIndex spawn_player(int x, int y) {
+static EntityIndex spawn_player(void) {
+  Position pos;
+  if (!map_get_random_passable(&WORLD.map, &pos, 100)) {
+    // Fallback to 0,0 if no passable position found
+    pos.x = 0;
+    pos.y = 0;
+  }
+
   EntityIndex player = entity_alloc();
-  entity_add(player, position, ((Position){x, y}));
+  entity_add(player, position, pos);
   entity_add(player, health, HEALTH_FULL);
   turn_queue_insert(player, 0);
   return player;
 }
 
-static EntityIndex spawn_monster(int x, int y) {
-  EntityIndex player = entity_alloc();
-  entity_add(player, position, ((Position){x, y}));
-  entity_add(player, health, HEALTH_FULL);
-  turn_queue_insert(player, 0);
-  return player;
+static EntityIndex spawn_monster(void) {
+  Position pos;
+  if (!map_get_random_passable(&WORLD.map, &pos, 100)) {
+    // Failed to find passable position, don't spawn
+    return 0;
+  }
+
+  EntityIndex monster = entity_alloc();
+  entity_add(monster, position, pos);
+  entity_add(monster, health, HEALTH_FULL);
+  turn_queue_insert(monster, 0);
+  return monster;
 }
 
-void game_init(WorldState *world) {
+void game_init(WorldState *world, uint64_t rng_seed) {
   active_world = world;
+  world->rng_state = rng_seed;
 
   // entity at index 0 should not be used (index 0 should mean "no entity")
   entity_alloc();
@@ -55,13 +71,27 @@ void game_init(WorldState *world) {
   world->turn_entity = entity_handle_from_index(turn_index);
   turn_queue_insert(turn_index, TURN_INTERVAL);
 
-  WORLD.player = entity_handle_from_index(spawn_player(0, 0));
+  // Generate map before spawning entities
+  WORLD.map.width = 128;
+  WORLD.map.height = 128;
 
-  spawn_monster(10, 10);
-  spawn_monster(0, 1);
+  BSPGenParams bsp_params = {
+    .max_depth = 5,           // More depth = more rooms
+    .min_region_size = 10,    // Stop splitting small regions
+    .min_child_size = 6,      // Minimum size for each child after split
+    .split_threshold = 14,    // Split along longer axis if above this
+    .min_room_size = 4,       // Minimum room dimensions
+    .room_padding = 2,        // Padding around rooms within regions
+    .map_border = 1,          // Keep 1 tile away from map edge
+  };
+  mapgen_bsp(&WORLD.map, &bsp_params);
 
-  WORLD.map.width = 64;
-  WORLD.map.height = 64;
+  // Spawn player and monsters in random passable positions
+  WORLD.player = entity_handle_from_index(spawn_player());
+
+  spawn_monster();
+  spawn_monster();
+  spawn_monster();
 
   // Generate test messages
   output_message("Welcome to the dungeon!");
@@ -253,15 +283,7 @@ void game_render(WorldState *world, RenderContext *ctx) {
       if (tile_x >= 0 && tile_x < (int)world->map.width && tile_y >= 0 &&
           tile_y < (int)world->map.height) {
 
-        int tile = TILE_FLOOR;
-
-        // Draw checkerboard pattern as test
-        if ((tile_x + tile_y) % 2 == 0) {
-          tile = 0; // First tile
-        } else {
-          tile = 1; // Second tile
-        }
-
+        int tile = world->map.cells[tile_y * MAP_WIDTH_MAX + tile_x].tile;
         geobuilder_tile(&geom, tile, screen_x, screen_y);
       }
       screen_x += ctx->tile_size;
@@ -359,6 +381,12 @@ void game_render(WorldState *world, RenderContext *ctx) {
 }
 
 #ifdef __wasm__
+extern unsigned char __heap_base;
+extern unsigned char __data_end;
+extern unsigned char __stack_pointer;
+
+unsigned char *get_heap_base(void) { return &__heap_base; }
+
 // WASM-friendly render function that takes viewport dimensions directly
 // and uses the imported submit_geometry function
 // Imported from JavaScript

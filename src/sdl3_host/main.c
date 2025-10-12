@@ -7,7 +7,7 @@
 #include <stdio.h>
 
 // Game API function pointers (loaded dynamically)
-typedef void (*GameInitFunc)(WorldState *world);
+typedef void (*GameInitFunc)(WorldState *world, uint64_t rng_seed);
 typedef void (*GameFrameFunc)(WorldState *world, double dt);
 typedef void (*GameRenderFunc)(WorldState *world, RenderContext *ctx);
 typedef void (*GameInputFunc)(WorldState *world, InputCommand command);
@@ -263,7 +263,7 @@ int main(int argc, char *argv[]) {
 
   // Initialize world
   WorldState world = {0};
-  game_api.game_init(&world);
+  game_api.game_init(&world, SDL_rand_bits());
 
   bool running = true;
   SDL_Event event;

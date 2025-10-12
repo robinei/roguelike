@@ -13,6 +13,10 @@ void action_move(EntityIndex entity, Direction dir) {
     return;
   }
 
+  if (!WORLD.map.cells[y * MAP_WIDTH_MAX + x].passable) {
+    return;
+  }
+
   world_query(i, BITS(position)) {
     Position *pos2 = &WORLD.position[i];
     if (x == pos2->x && y == pos2->y) {

@@ -2,6 +2,7 @@
 
 #include "common.h"
 #include "components.h"
+#include "map.h"
 #include "particles.h"
 #include "turn_queue.h"
 
@@ -38,19 +39,6 @@
 
 #define entity_unmark(entity_idx, marker)                                      \
   CLEAR_COMPONENT_BIT(entity_idx, marker)
-
-// ============================================================================
-// Map
-// ============================================================================
-
-#define MAP_WIDTH_MAX 512
-#define MAP_HEIGHT_MAX 512
-
-typedef struct {
-  int width;
-  int height;
-  uint8_t flags[MAP_WIDTH_MAX * MAP_HEIGHT_MAX];
-} Map;
 
 // ============================================================================
 // Visible message log
@@ -108,6 +96,7 @@ typedef enum {
   INPUT_CMD_UP_LEFT,
 
   INPUT_CMD_PERIOD,
+  INPUT_CMD_R,
 } InputCommand;
 
 // ============================================================================

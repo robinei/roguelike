@@ -4,7 +4,7 @@
 #include "world.h"
 
 // called once at game launch
-void game_init(WorldState *world);
+void game_init(WorldState *world, uint64_t rng_seed);
 
 // called when input is received (like key presses). will drive forward the turn
 // based simulation
