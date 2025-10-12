@@ -1,95 +1,149 @@
 #include "render_api.h"
 #include "prnf.h"
+#include <stdarg.h>
 
-void cmdbuf_clear(CommandBuffer *buf) { buf->count = 0; }
+// Tile atlas constants
+#define TILE_SIZE 12
+#define TILE_PADDING 1
 
-void cmdbuf_flush(CommandBuffer *buf, PlatformContext *ctx) {
-  if (buf->count > 0) {
-    ctx->execute_render_commands(ctx->impl_data, buf);
-    cmdbuf_clear(buf);
+void geobuilder_init(GeometryBuilder *geom, RenderContext *ctx) {
+  geom->count = 0;
+  geom->ctx = ctx;
+}
+
+void geobuilder_clear(GeometryBuilder *geom) { geom->count = 0; }
+
+void geobuilder_flush(GeometryBuilder *geom) {
+  if (geom->count > 0) {
+    geom->ctx->submit_geometry(geom->ctx->impl_data, geom->vertices,
+                               geom->count);
+    geom->count = 0;
   }
 }
 
-static void cmdbuf_flush_if_full(CommandBuffer *buf, PlatformContext *ctx) {
-  if (buf->count >= COMMAND_BUFFER_CAPACITY) {
-    ctx->execute_render_commands(ctx->impl_data, buf);
-    cmdbuf_clear(buf);
+static void geobuilder_flush_if_full(GeometryBuilder *geom,
+                                     int vertices_needed) {
+  if (geom->count + vertices_needed > MAX_VERTICES) {
+    geobuilder_flush(geom);
   }
 }
 
-void cmdbuf_tile(CommandBuffer *buf, PlatformContext *ctx, int tile_index,
-                 int x, int y, int w, int h) {
-  cmdbuf_flush_if_full(buf, ctx);
+static void geobuilder_vert(GeometryBuilder *geom, float x, float y,
+                            Color color, float u, float v) {
+  geobuilder_flush_if_full(geom, 1);
 
-  int idx = buf->count;
-  buf->types[idx] = RENDER_CMD_TILE;
-  buf->data[idx * 6 + 0] = 0; // Unused (was atlas_id)
-  buf->data[idx * 6 + 1] = tile_index;
-  buf->data[idx * 6 + 2] = x;
-  buf->data[idx * 6 + 3] = y;
-  buf->data[idx * 6 + 4] = w;
-  buf->data[idx * 6 + 5] = h;
-  buf->count++;
+  Vertex *vert = &geom->vertices[geom->count++];
+  vert->position[0] = x;
+  vert->position[1] = y;
+  vert->color[0] = color.r / 255.0f;
+  vert->color[1] = color.g / 255.0f;
+  vert->color[2] = color.b / 255.0f;
+  vert->color[3] = color.a / 255.0f;
+  vert->tex_coord[0] = u;
+  vert->tex_coord[1] = v;
 }
 
-void cmdbuf_rect(CommandBuffer *buf, PlatformContext *ctx, int x, int y, int w,
-                 int h, uint32_t color) {
-  cmdbuf_flush_if_full(buf, ctx);
+// Helper: push a quad (2 triangles = 6 vertices)
+static void geobuilder_quad(GeometryBuilder *geom, float x0, float y0, float x1,
+                            float y1, Color color, float u0, float v0, float u1,
+                            float v1) {
+  geobuilder_flush_if_full(geom, 6);
 
-  int idx = buf->count;
-  buf->types[idx] = RENDER_CMD_RECT;
-  buf->data[idx * 6 + 0] = x;
-  buf->data[idx * 6 + 1] = y;
-  buf->data[idx * 6 + 2] = w;
-  buf->data[idx * 6 + 3] = h;
-  buf->data[idx * 6 + 4] = (int32_t)color;
-  buf->data[idx * 6 + 5] = 0; // Unused
-  buf->count++;
+  // Triangle 1: top-left, top-right, bottom-left
+  geobuilder_vert(geom, x0, y0, color, u0, v0);
+  geobuilder_vert(geom, x1, y0, color, u1, v0);
+  geobuilder_vert(geom, x0, y1, color, u0, v1);
+
+  // Triangle 2: bottom-left, top-right, bottom-right
+  geobuilder_vert(geom, x0, y1, color, u0, v1);
+  geobuilder_vert(geom, x1, y0, color, u1, v0);
+  geobuilder_vert(geom, x1, y1, color, u1, v1);
 }
 
-void cmdbuf_line(CommandBuffer *buf, PlatformContext *ctx, int x0, int y0,
-                 int x1, int y1, uint32_t color) {
-  cmdbuf_flush_if_full(buf, ctx);
+void geobuilder_tile(GeometryBuilder *geom, int tile_index, int x, int y) {
+  RenderContext *ctx = geom->ctx;
+  int tile_size = ctx->tile_size;
 
-  int idx = buf->count;
-  buf->types[idx] = RENDER_CMD_LINE;
-  buf->data[idx * 6 + 0] = x0;
-  buf->data[idx * 6 + 1] = y0;
-  buf->data[idx * 6 + 2] = x1;
-  buf->data[idx * 6 + 3] = y1;
-  buf->data[idx * 6 + 4] = (int32_t)color;
-  buf->data[idx * 6 + 5] = 0; // Unused
-  buf->count++;
+  // Calculate tile position in atlas (with padding)
+  int atlas_cols =
+      (ctx->atlas_width_px - TILE_PADDING) / (TILE_SIZE + TILE_PADDING);
+  int tile_x = tile_index % atlas_cols;
+  int tile_y = tile_index / atlas_cols;
+  int atlas_x = TILE_PADDING + tile_x * (TILE_SIZE + TILE_PADDING);
+  int atlas_y = TILE_PADDING + tile_y * (TILE_SIZE + TILE_PADDING);
+
+  // Calculate texture coordinates (0-1 range)
+  float u0 = (float)atlas_x / ctx->atlas_width_px;
+  float v0 = (float)atlas_y / ctx->atlas_height_px;
+  float u1 = (float)(atlas_x + TILE_SIZE) / ctx->atlas_width_px;
+  float v1 = (float)(atlas_y + TILE_SIZE) / ctx->atlas_height_px;
+
+  // Screen coordinates
+  float x0 = (float)x;
+  float y0 = (float)y;
+  float x1 = (float)(x + tile_size);
+  float y1 = (float)(y + tile_size);
+
+  // White color for textured quads (texture colors pass through)
+  Color white = {255, 255, 255, 255};
+
+  geobuilder_quad(geom, x0, y0, x1, y1, white, u0, v0, u1, v1);
 }
 
-void cmdbuf_text(CommandBuffer *buf, PlatformContext *ctx, int x, int y,
-                 TextAlign align, uint32_t bg_color, const char *fmt, ...) {
+void geobuilder_rect(GeometryBuilder *geom, int x, int y, int w, int h,
+                     Color color) {
+  RenderContext *ctx = geom->ctx;
+
+  // Calculate white tile position in atlas
+  int atlas_cols =
+      (ctx->atlas_width_px - TILE_PADDING) / (TILE_SIZE + TILE_PADDING);
+  int tile_x = WHITE_TILE_INDEX % atlas_cols;
+  int tile_y = WHITE_TILE_INDEX / atlas_cols;
+  int atlas_x = TILE_PADDING + tile_x * (TILE_SIZE + TILE_PADDING);
+  int atlas_y = TILE_PADDING + tile_y * (TILE_SIZE + TILE_PADDING);
+
+  // Sample center pixel of white tile to avoid edge artifacts
+  float u = (atlas_x + TILE_SIZE / 2.0f) / ctx->atlas_width_px;
+  float v = (atlas_y + TILE_SIZE / 2.0f) / ctx->atlas_height_px;
+
+  // Screen coordinates
+  float x0 = (float)x;
+  float y0 = (float)y;
+  float x1 = (float)(x + w);
+  float y1 = (float)(y + h);
+
+  geobuilder_quad(geom, x0, y0, x1, y1, color, u, v, u, v);
+}
+
+void geobuilder_text(GeometryBuilder *geom, int x, int y, TextAlign align,
+                     Color bg_color, const char *fmt, ...) {
   char text[256];
   va_list args;
   va_start(args, fmt);
   vsnprnf(text, sizeof(text), fmt, args);
   va_end(args);
 
+  int tile_size = geom->ctx->tile_size;
+
   // Calculate text width
   int text_width = 0;
   for (const char *p = text; *p; p++) {
-    text_width += ctx->tile_size;
+    text_width += tile_size;
   }
 
   // Adjust x for right alignment
   int draw_x = (align == TEXT_ALIGN_RIGHT) ? (x - text_width) : x;
 
   // Draw background if alpha > 0
-  if ((bg_color & 0xFF) > 0) {
-    cmdbuf_rect(buf, ctx, draw_x, y, text_width, ctx->tile_size, bg_color);
+  if (bg_color.a > 0) {
+    geobuilder_rect(geom, draw_x, y, text_width, tile_size, bg_color);
   }
 
   // Draw text
   int char_x = draw_x;
   for (const char *p = text; *p; p++) {
     unsigned char ch = (unsigned char)*p;
-    cmdbuf_tile(buf, ctx, FONT_BASE_INDEX + ch, char_x, y, ctx->tile_size,
-                ctx->tile_size);
-    char_x += ctx->tile_size;
+    geobuilder_tile(geom, FONT_BASE_INDEX + ch, char_x, y);
+    char_x += tile_size;
   }
 }

@@ -199,10 +199,12 @@ void game_input(WorldState *world, InputCommand command) {
   WORLD.next_player_input = command;
 }
 
-void game_render(WorldState *world, PlatformContext *platform) {
+void game_render(WorldState *world, RenderContext *ctx) {
   active_world = world;
 
-  CommandBuffer cmd_buf = {0};
+  // Use static to avoid stack overflow (GeometryBuilder is ~128KB)
+  static GeometryBuilder geom;
+  geobuilder_init(&geom, ctx);
 
   // Get player position for camera centering
   EntityIndex player_idx = entity_handle_to_index(world->player);
@@ -227,27 +229,25 @@ void game_render(WorldState *world, PlatformContext *platform) {
 
   // Calculate camera position in pixels (center on player's interpolated
   // position)
-  float camera_center_px = camera_center_x * platform->tile_size;
-  float camera_center_py = camera_center_y * platform->tile_size;
+  float camera_center_px = camera_center_x * ctx->tile_size;
+  float camera_center_py = camera_center_y * ctx->tile_size;
 
   // Calculate top-left corner of viewport in pixels
-  float viewport_left_px =
-      camera_center_px - platform->viewport_width_px / 2.0f;
-  float viewport_top_px =
-      camera_center_py - platform->viewport_height_px / 2.0f;
+  float viewport_left_px = camera_center_px - ctx->viewport_width_px / 2.0f;
+  float viewport_top_px = camera_center_py - ctx->viewport_height_px / 2.0f;
 
   // Calculate top-left tile and pixel offset
-  int start_tile_x = (int)(viewport_left_px / platform->tile_size);
-  int start_tile_y = (int)(viewport_top_px / platform->tile_size);
-  int offset_x = (int)(viewport_left_px - start_tile_x * platform->tile_size);
-  int offset_y = (int)(viewport_top_px - start_tile_y * platform->tile_size);
+  int start_tile_x = (int)(viewport_left_px / ctx->tile_size);
+  int start_tile_y = (int)(viewport_top_px / ctx->tile_size);
+  int offset_x = (int)(viewport_left_px - start_tile_x * ctx->tile_size);
+  int offset_y = (int)(viewport_top_px - start_tile_y * ctx->tile_size);
 
   // Draw visible tiles
   int screen_y = -offset_y;
-  for (int tile_y = start_tile_y; screen_y < platform->viewport_height_px;
+  for (int tile_y = start_tile_y; screen_y < ctx->viewport_height_px;
        tile_y++) {
     int screen_x = -offset_x;
-    for (int tile_x = start_tile_x; screen_x < platform->viewport_width_px;
+    for (int tile_x = start_tile_x; screen_x < ctx->viewport_width_px;
          tile_x++) {
       // Check if tile is within map bounds
       if (tile_x >= 0 && tile_x < (int)world->map.width && tile_y >= 0 &&
@@ -262,12 +262,11 @@ void game_render(WorldState *world, PlatformContext *platform) {
           tile = 1; // Second tile
         }
 
-        cmdbuf_tile(&cmd_buf, platform, tile, screen_x, screen_y,
-                    platform->tile_size, platform->tile_size);
+        geobuilder_tile(&geom, tile, screen_x, screen_y);
       }
-      screen_x += platform->tile_size;
+      screen_x += ctx->tile_size;
     }
-    screen_y += platform->tile_size;
+    screen_y += ctx->tile_size;
   }
 
   // Draw entities with position component
@@ -317,15 +316,14 @@ void game_render(WorldState *world, PlatformContext *platform) {
     }
 
     // Convert world position to pixels, then to screen coordinates
-    float world_px = world_x * platform->tile_size;
-    float world_py = world_y * platform->tile_size;
+    float world_px = world_x * ctx->tile_size;
+    float world_py = world_y * ctx->tile_size;
     int screen_x = (int)(world_px - viewport_left_px);
     int screen_y = (int)(world_py - viewport_top_px);
 
     // For now, all entities are rendered as TILE_PLAYER
     // TODO: Use glyph component or similar to determine tile
-    cmdbuf_tile(&cmd_buf, platform, TILE_PLAYER, screen_x, screen_y,
-                platform->tile_size, platform->tile_size);
+    geobuilder_tile(&geom, TILE_PLAYER, screen_x, screen_y);
   }
 
 // Draw message log at bottom of screen
@@ -344,41 +342,42 @@ void game_render(WorldState *world, PlatformContext *platform) {
     const char *text = world->messages[msg_idx].text;
 
     // Position from bottom up
-    int y = platform->viewport_height_px -
-            (messages_to_show - i) * platform->tile_size;
+    int y = ctx->viewport_height_px - (messages_to_show - i) * ctx->tile_size;
 
-    cmdbuf_text(&cmd_buf, platform, 0, y, TEXT_ALIGN_LEFT, RGBA(0, 0, 0, 192),
-                "%s", text);
+    geobuilder_text(&geom, 0, y, TEXT_ALIGN_LEFT, (Color){.a = 192}, "%s",
+                    text);
   }
 
   // Draw FPS in upper right corner
   if (WORLD.fps > 0.0f) {
-    cmdbuf_text(&cmd_buf, platform, platform->viewport_width_px, 0,
-                TEXT_ALIGN_RIGHT, RGBA(0, 0, 0, 192), "%.1f FPS",
-                (double)WORLD.fps);
+    geobuilder_text(&geom, ctx->viewport_width_px, 0, TEXT_ALIGN_RIGHT,
+                    (Color){.a = 192}, "%.1f FPS", (double)WORLD.fps);
   }
 
-  // Flush any remaining commands
-  cmdbuf_flush(&cmd_buf, platform);
+  // Flush any remaining vertices
+  geobuilder_flush(&geom);
 }
 
 #ifdef __wasm__
 // WASM-friendly render function that takes viewport dimensions directly
-// and uses the imported execute_render_commands function
+// and uses the imported submit_geometry function
 // Imported from JavaScript
-extern void execute_render_commands(void *impl_data,
-                                    const CommandBuffer *buffer);
+extern void submit_geometry(void *impl_data, const Vertex *vertices,
+                            int vertex_count);
 
 void game_render_wasm(WorldState *world, int viewport_width_px,
-                      int viewport_height_px, int tile_size) {
-  PlatformContext platform = {
+                      int viewport_height_px, int tile_size, int atlas_width_px,
+                      int atlas_height_px) {
+  RenderContext ctx = {
       .viewport_width_px = viewport_width_px,
       .viewport_height_px = viewport_height_px,
       .tile_size = tile_size,
-      .execute_render_commands = execute_render_commands,
+      .atlas_width_px = atlas_width_px,
+      .atlas_height_px = atlas_height_px,
+      .submit_geometry = submit_geometry,
       .impl_data = NULL, // Not used in WASM
   };
 
-  game_render(world, &platform);
+  game_render(world, &ctx);
 }
 #endif

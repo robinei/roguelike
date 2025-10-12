@@ -9,7 +9,7 @@
 // Game API function pointers (loaded dynamically)
 typedef void (*GameInitFunc)(WorldState *world);
 typedef void (*GameFrameFunc)(WorldState *world, double dt);
-typedef void (*GameRenderFunc)(WorldState *world, PlatformContext *platform);
+typedef void (*GameRenderFunc)(WorldState *world, RenderContext *ctx);
 typedef void (*GameInputFunc)(WorldState *world, InputCommand command);
 
 typedef struct {
@@ -202,99 +202,16 @@ static bool load_game_api(GameAPI *api, const char *lib_path) {
   return true;
 }
 
-// Extract RGBA components from packed color
-static inline void extract_rgba(uint32_t color, uint8_t *r, uint8_t *g,
-                                uint8_t *b, uint8_t *a) {
-  *r = (color >> 24) & 0xFF;
-  *g = (color >> 16) & 0xFF;
-  *b = (color >> 8) & 0xFF;
-  *a = color & 0xFF;
-}
-
-// Execute a command buffer - callback for PlatformContext
-static void execute_render_commands(void *impl_data,
-                                    const CommandBuffer *buffer) {
+// Submit geometry - callback for RenderContext
+// Vertices are in the exact format compatible with SDL_Vertex
+static void submit_geometry(void *impl_data, const Vertex *vertices,
+                            int vertex_count) {
   Renderer *r = (Renderer *)impl_data;
 
-  for (int i = 0; i < buffer->count; i++) {
-    const int32_t *data = &buffer->data[i * 6];
-
-    switch (buffer->types[i]) {
-    case RENDER_CMD_TILE: {
-      // data[0] is unused (was atlas_id)
-      int tile_index = data[1];
-      int x = data[2];
-      int y = data[3];
-      int w = data[4];
-      int h = data[5];
-
-      // Use combined atlas texture
-      SDL_Texture *texture = r->atlas_texture;
-
-      // Calculate tile position in combined atlas (all tiles use same layout
-      // with padding)
-      int tile_x = tile_index % r->atlas_cols;
-      int tile_y = tile_index / r->atlas_cols;
-
-      // Atlas position with padding
-      int atlas_x = TILE_PADDING + tile_x * (TILE_SIZE + TILE_PADDING);
-      int atlas_y = TILE_PADDING + tile_y * (TILE_SIZE + TILE_PADDING);
-
-      SDL_FRect src = {
-          .x = (float)atlas_x,
-          .y = (float)atlas_y,
-          .w = TILE_SIZE,
-          .h = TILE_SIZE,
-      };
-
-      SDL_FRect dst = {
-          .x = (float)x,
-          .y = (float)y,
-          .w = (float)w,
-          .h = (float)h,
-      };
-
-      SDL_RenderTexture(r->renderer, texture, &src, &dst);
-      break;
-    }
-
-    case RENDER_CMD_RECT: {
-      int x = data[0];
-      int y = data[1];
-      int w = data[2];
-      int h = data[3];
-      uint32_t color = (uint32_t)data[4];
-
-      uint8_t red, green, blue, alpha;
-      extract_rgba(color, &red, &green, &blue, &alpha);
-
-      SDL_SetRenderDrawColor(r->renderer, red, green, blue, alpha);
-      SDL_FRect rect = {
-          .x = (float)x,
-          .y = (float)y,
-          .w = (float)w,
-          .h = (float)h,
-      };
-      SDL_RenderFillRect(r->renderer, &rect);
-      break;
-    }
-
-    case RENDER_CMD_LINE: {
-      int x0 = data[0];
-      int y0 = data[1];
-      int x1 = data[2];
-      int y1 = data[3];
-      uint32_t color = (uint32_t)data[4];
-
-      uint8_t red, green, blue, alpha;
-      extract_rgba(color, &red, &green, &blue, &alpha);
-
-      SDL_SetRenderDrawColor(r->renderer, red, green, blue, alpha);
-      SDL_RenderLine(r->renderer, (float)x0, (float)y0, (float)x1, (float)y1);
-      break;
-    }
-    }
-  }
+  // Cast our Vertex format directly to SDL_Vertex
+  // They have identical layout by design
+  SDL_RenderGeometry(r->renderer, r->atlas_texture,
+                     (const SDL_Vertex *)vertices, vertex_count, NULL, 0);
 }
 
 static InputCommand map_key_to_command(SDL_Keycode key) {
@@ -447,17 +364,19 @@ int main(int argc, char *argv[]) {
     SDL_SetRenderDrawColor(renderer.renderer, 0, 0, 0, 255);
     SDL_RenderClear(renderer.renderer);
 
-    // Set up platform context
-    PlatformContext platform = {
+    // Set up render context
+    RenderContext ctx = {
         .viewport_width_px = renderer.window_width,
         .viewport_height_px = renderer.window_height,
         .tile_size = renderer.scaled_tile_size,
-        .execute_render_commands = execute_render_commands,
+        .atlas_width_px = renderer.atlas_width,
+        .atlas_height_px = renderer.atlas_height,
+        .submit_geometry = submit_geometry,
         .impl_data = &renderer,
     };
 
     // Call game render
-    game_api.game_render(&world, &platform);
+    game_api.game_render(&world, &ctx);
 
     // Present
     SDL_RenderPresent(renderer.renderer);

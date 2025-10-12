@@ -10,6 +10,7 @@
 // Font glyphs start at index 10300 (256 glyphs from CP437)
 // Last tile (10711) is white for colored rects
 #define FONT_BASE_INDEX 10300
+#define WHITE_TILE_INDEX 10711
 
 typedef enum {
   TILE_FLOOR = 0,
@@ -20,22 +21,22 @@ typedef enum {
 } TileType;
 
 // ============================================================================
-// Render command buffer
+// Vertex format (compatible with SDL_Vertex)
 // ============================================================================
 
-typedef enum {
-  RENDER_CMD_TILE, // Textured rect (atlas tiles, font glyphs, particles, etc.)
-  RENDER_CMD_RECT, // Colored rect
-  RENDER_CMD_LINE, // Colored line
-} RenderCommandType;
-
-#define COMMAND_BUFFER_CAPACITY 512
+// Vertex format compatible with SDL_Vertex
+// This exact layout matches SDL_Vertex so hosts can cast directly
+typedef struct {
+  float position[2];  // Screen position in pixels (x, y)
+  float color[4];     // Vertex color (r, g, b, a) in 0-1 range
+  float tex_coord[2]; // Texture coordinates (u, v) in 0-1 range
+} Vertex;
 
 typedef struct {
-  int count;
-  uint8_t types[COMMAND_BUFFER_CAPACITY];
-  int32_t data[COMMAND_BUFFER_CAPACITY * 6]; // Max 6 ints per command
-} CommandBuffer;
+  uint8_t r, g, b, a;
+} Color;
+
+#define MAX_VERTICES 4096
 
 // ============================================================================
 // Platform context - host services available to the game
@@ -47,10 +48,16 @@ typedef struct {
   int viewport_height_px; // Viewport height in pixels
   int tile_size;          // Logical tile size (12x12 for this game)
 
-  // Rendering callback - executes commands synchronously
-  // All coordinates in command buffers are in pixels
+  // Atlas dimensions for calculating texture coordinates
+  int atlas_width_px;
+  int atlas_height_px;
+
+  // Rendering callback - submits vertices for drawing
+  // Vertices form triangles (every 3 vertices = 1 triangle)
+  // The combined texture atlas is implicitly bound
   // Buffer can be reused immediately after this returns
-  void (*execute_render_commands)(void *impl_data, const CommandBuffer *buffer);
+  void (*submit_geometry)(void *impl_data, const Vertex *vertices,
+                          int vertex_count);
 
   // Future host services can be added here:
   // void (*play_sound)(void *impl_data, SoundId sound);
@@ -59,33 +66,35 @@ typedef struct {
 
   // Implementation-specific data (SDL renderer, textures, JS context, etc.)
   void *impl_data;
-} PlatformContext;
+} RenderContext;
 
 // ============================================================================
-// Command buffer helpers
+// Geometry builder - builds vertex buffers for rendering
 // ============================================================================
 
-// Color helper macro - RGBA8888 format
-#define RGBA(r, g, b, a) ((uint32_t)((r) << 24 | (g) << 16 | (b) << 8 | (a)))
+typedef struct {
+  Vertex vertices[MAX_VERTICES];
+  int count;
+  RenderContext *ctx;
+} GeometryBuilder;
 
-void cmdbuf_clear(CommandBuffer *buf);
+// Initialize geometry builder with render context
+void geobuilder_init(GeometryBuilder *geom, RenderContext *ctx);
 
-void cmdbuf_flush(CommandBuffer *buf, PlatformContext *ctx);
+// Clear vertex buffer
+void geobuilder_clear(GeometryBuilder *geom);
 
-// Draw textured rect from atlas (coordinates in pixels)
-// TILE: tile_index, x, y, w, h (5 ints, using combined atlas)
-void cmdbuf_tile(CommandBuffer *buf, PlatformContext *ctx, int tile_index,
-                 int x, int y, int w, int h);
+// Flush accumulated vertices to the host
+void geobuilder_flush(GeometryBuilder *geom);
 
-// Draw colored rect (coordinates in pixels)
-// RECT: x, y, w, h, color (5 ints)
-void cmdbuf_rect(CommandBuffer *buf, PlatformContext *ctx, int x, int y, int w,
-                 int h, uint32_t color);
+// Push a textured quad (6 vertices = 2 triangles)
+// tile_index is the tile index in the combined atlas
+// Renders at tile_size × tile_size from the context
+void geobuilder_tile(GeometryBuilder *geom, int tile_index, int x, int y);
 
-// Draw colored line (coordinates in pixels)
-// LINE: x0, y0, x1, y1, color (5 ints)
-void cmdbuf_line(CommandBuffer *buf, PlatformContext *ctx, int x0, int y0,
-                 int x1, int y1, uint32_t color);
+// Push a colored rect (6 vertices using white tile center)
+void geobuilder_rect(GeometryBuilder *geom, int x, int y, int w, int h,
+                     Color color);
 
 // Text rendering alignment
 typedef enum {
@@ -95,5 +104,5 @@ typedef enum {
 
 // Draw formatted text with optional background
 // If bg_color alpha is 0, no background is drawn
-void cmdbuf_text(CommandBuffer *buf, PlatformContext *ctx, int x, int y,
-                 TextAlign align, uint32_t bg_color, const char *fmt, ...);
+void geobuilder_text(GeometryBuilder *geom, int x, int y, TextAlign align,
+                     Color bg_color, const char *fmt, ...);

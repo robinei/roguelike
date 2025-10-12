@@ -1,8 +1,6 @@
 #pragma once
 
 #include "identity.h"
-#include <stdbool.h>
-#include <stdint.h>
 
 #define STR_DEFAULT 2
 #define DEX_DEFAULT 2

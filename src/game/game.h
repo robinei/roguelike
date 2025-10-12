@@ -14,5 +14,5 @@ void game_input(WorldState *world, InputCommand command);
 // system
 void game_frame(WorldState *world, double dt);
 
-// render the game state using the provided platform context
-void game_render(WorldState *world, PlatformContext *platform);
+// render the game state using the provided render context
+void game_render(WorldState *world, RenderContext *ctx);
