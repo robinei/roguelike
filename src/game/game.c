@@ -2,6 +2,7 @@
 #include "actions/actions.h"
 #include "common.h"
 #include "components.h"
+#include "fov.h"
 #include "map.h"
 #include "mapgen/mapgen.h"
 #include "particles.h"
@@ -10,6 +11,14 @@
 #include "render_api.h"
 #include "turn_queue.h"
 #include "world.h"
+
+static void update_player_fov(void) {
+  EntityIndex player_idx = entity_handle_to_index(WORLD.player);
+  if (entity_has(player_idx, position)) {
+    Position *pos = &WORLD.position[player_idx];
+    fov_compute(&WORLD.map, pos->x, pos->y, PLAYER_FOV_RADIUS);
+  }
+}
 
 static void particle_emit_system_tick() {
   world_query(i, BITS(particle_emitter)) {
@@ -76,13 +85,13 @@ void game_init(WorldState *world, uint64_t rng_seed) {
   WORLD.map.height = 128;
 
   BSPGenParams bsp_params = {
-    .max_depth = 5,           // More depth = more rooms
-    .min_region_size = 10,    // Stop splitting small regions
-    .min_child_size = 6,      // Minimum size for each child after split
-    .split_threshold = 14,    // Split along longer axis if above this
-    .min_room_size = 4,       // Minimum room dimensions
-    .room_padding = 2,        // Padding around rooms within regions
-    .map_border = 1,          // Keep 1 tile away from map edge
+      .max_depth = 5,        // More depth = more rooms
+      .min_region_size = 10, // Stop splitting small regions
+      .min_child_size = 6,   // Minimum size for each child after split
+      .split_threshold = 14, // Split along longer axis if above this
+      .min_room_size = 4,    // Minimum room dimensions
+      .room_padding = 2,     // Padding around rooms within regions
+      .map_border = 1,       // Keep 1 tile away from map edge
   };
   mapgen_bsp(&WORLD.map, &bsp_params);
 
@@ -92,6 +101,9 @@ void game_init(WorldState *world, uint64_t rng_seed) {
   spawn_monster();
   spawn_monster();
   spawn_monster();
+
+  // Compute initial FOV for player
+  update_player_fov();
 
   // Generate test messages
   output_message("Welcome to the dungeon!");
@@ -190,6 +202,17 @@ void game_frame(WorldState *world, double dt) {
 
   particles_update(dt);
 
+  if (WORLD.anim.type != ACTION_ANIM_NONE) {
+    EntityIndex actor = entity_handle_to_index(WORLD.anim.actor);
+    if (entity_has(actor, position)) {
+      int x = WORLD.position[actor].x;
+      int y = WORLD.position[actor].y;
+      if (!WORLD.map.cells[y * MAP_WIDTH_MAX + x].visible) {
+        memset(&WORLD.anim, 0, sizeof(WORLD.anim));
+      }
+    }
+  }
+
   // Advance action animation
   if (WORLD.anim.type != ACTION_ANIM_NONE) {
     const double ANIM_DURATION = 0.15; // 150ms per action
@@ -272,7 +295,11 @@ void game_render(WorldState *world, RenderContext *ctx) {
   int offset_x = (int)(viewport_left_px - start_tile_x * ctx->tile_size);
   int offset_y = (int)(viewport_top_px - start_tile_y * ctx->tile_size);
 
-  // Draw visible tiles
+  // Get player position for torch lighting
+  float player_tile_x = camera_center_x;
+  float player_tile_y = camera_center_y;
+
+  // Draw visible tiles with torch lighting
   int screen_y = -offset_y;
   for (int tile_y = start_tile_y; screen_y < ctx->viewport_height_px;
        tile_y++) {
@@ -285,6 +312,38 @@ void game_render(WorldState *world, RenderContext *ctx) {
 
         int tile = world->map.cells[tile_y * MAP_WIDTH_MAX + tile_x].tile;
         geobuilder_tile(&geom, tile, screen_x, screen_y);
+
+        // Calculate darkness overlay based on visibility and distance from
+        // player
+        uint8_t darkness_alpha = 192; // Full darkness for non-visible tiles
+
+        if (world->map.cells[tile_y * MAP_WIDTH_MAX + tile_x].visible) {
+          // Visible tile - calculate torch lighting based on distance
+          float dx = tile_x - player_tile_x;
+          float dy = tile_y - player_tile_y;
+          float dist_sq = dx * dx + dy * dy;
+
+          if (dist_sq > 0.01f) {
+            float dist = 1.0f / rsqrt(dist_sq);
+
+            // Fade from 0 (no darkness) at player position to 192 (full
+            // darkness) at torch radius
+            if (dist < PLAYER_TORCH_RADIUS) {
+              float fade = dist / PLAYER_TORCH_RADIUS;
+              darkness_alpha = (uint8_t)(fade * 192.0f);
+            }
+            // else: beyond torch radius, use full darkness (192)
+          } else {
+            // At player position - no darkness
+            darkness_alpha = 0;
+          }
+        }
+
+        // Draw darkness overlay if needed
+        if (darkness_alpha > 0) {
+          geobuilder_rect(&geom, screen_x, screen_y, ctx->tile_size,
+                          ctx->tile_size, (Color){0, 0, 0, darkness_alpha});
+        }
       }
       screen_x += ctx->tile_size;
     }

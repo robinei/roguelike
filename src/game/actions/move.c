@@ -1,3 +1,4 @@
+#include "../fov.h"
 #include "../world.h"
 #include "actions.h"
 
@@ -32,4 +33,9 @@ void action_move(EntityIndex entity, Direction dir) {
                             .move = {.from = *pos, .to = {x, y}}};
 
   *pos = (Position){x, y};
+
+  // Update FOV if player moved
+  if (entity_is_player(entity)) {
+    fov_compute(&WORLD.map, x, y, PLAYER_FOV_RADIUS);
+  }
 }

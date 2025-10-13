@@ -22,6 +22,7 @@ static inline float rsqrt(float number) {
 #define sinf __builtin_sin
 #define cosf __builtin_cos
 #define atan2f __builtin_atan2
+#define atan2 __builtin_atan2
 #define memcpy __builtin_memcpy
 #define memset __builtin_memset
 
@@ -54,6 +55,10 @@ extern void js_log(LogLevel level, const char *message);
 #include <assert.h>
 #include <math.h>
 #include <string.h>
+#endif
+
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
 #endif
 
 #define MAX_ENTITIES 4096
