@@ -3,7 +3,7 @@
 
 // Adapted from: http://www.roguebasin.com/index.php?title=Spiral_Path_FOV
 
-#define MAX_RADIUS 300
+#define MAX_RADIUS 64
 #define TABLE_DIM (2 * MAX_RADIUS)
 #define QUEUE_LENGTH (2 * TABLE_DIM)
 #define MAX_ANGLE ((int)(1000000 * 2.0 * M_PI))
@@ -131,12 +131,54 @@ static void init_tables(void) {
   tables_initialized = true;
 }
 
-// Forward declarations for local functions
-static void mark(int x, int y, int min, int max, int *queue_head_ptr,
-                 int *queue_tail_ptr);
+// Add light to a tile and enqueue it if not already queued
+static void mark(int x, int y, int min, int max, int *queue_tail_ptr) {
+  int table_index = calc_table_index(x, y);
+  int min_lit = min_lit_table[table_index];
+  int max_lit = max_lit_table[table_index];
+
+  if (min_lit == 0 && max_lit == 0) {
+    // No light - not in queue, so add it
+    queue_x[*queue_tail_ptr] = x;
+    queue_y[*queue_tail_ptr] = y;
+    *queue_tail_ptr = (*queue_tail_ptr + 1) % QUEUE_LENGTH;
+
+    min_lit_table[table_index] = min;
+    max_lit_table[table_index] = max;
+  } else {
+    // Already in queue - expand lighting range
+    if (min < min_lit) {
+      min_lit_table[table_index] = min;
+    }
+    if (max > max_lit) {
+      max_lit_table[table_index] = max;
+    }
+  }
+}
+
+// Test if we can add light to a tile
 static void test_mark(int x, int y, int min_lit_angle, int max_lit_angle,
-                      int min_angle, int max_angle, int *queue_head_ptr,
-                      int *queue_tail_ptr);
+                      int min_angle, int max_angle, int *queue_tail_ptr) {
+  if (min_lit_angle > max_lit_angle) {
+    // Passing light along anomaly axis
+    mark(x, y, min_angle, max_angle, queue_tail_ptr);
+  } else if (max_angle < min_lit_angle || min_angle > max_lit_angle) {
+    // Lightable area is outside the lighting
+    return;
+  } else if (min_angle <= min_lit_angle && max_lit_angle <= max_angle) {
+    // Lightable area contains the lighting
+    mark(x, y, min_lit_angle, max_lit_angle, queue_tail_ptr);
+  } else if (min_angle >= min_lit_angle && max_lit_angle >= max_angle) {
+    // Lightable area contained by the lighting
+    mark(x, y, min_angle, max_angle, queue_tail_ptr);
+  } else if (min_angle >= min_lit_angle && max_lit_angle <= max_angle) {
+    // Least of lightable area overlaps greatest of lighting
+    mark(x, y, min_angle, max_lit_angle, queue_tail_ptr);
+  } else if (min_angle <= min_lit_angle && max_lit_angle >= max_angle) {
+    // Greatest of lightable area overlaps least of lighting
+    mark(x, y, min_lit_angle, max_angle, queue_tail_ptr);
+  }
+}
 
 void fov_compute(Map *map, int origin_x, int origin_y, int radius) {
   init_tables();
@@ -166,13 +208,13 @@ void fov_compute(Map *map, int origin_x, int origin_y, int radius) {
 
   // Starting set: 4 squares at manhattan distance 1
   test_mark(1, 0, arc_start, arc_end, min_angle_table[calc_table_index(1, 0)],
-            max_angle_table[calc_table_index(1, 0)], &queue_head, &queue_tail);
+            max_angle_table[calc_table_index(1, 0)], &queue_tail);
   test_mark(0, 1, arc_start, arc_end, min_angle_table[calc_table_index(0, 1)],
-            max_angle_table[calc_table_index(0, 1)], &queue_head, &queue_tail);
+            max_angle_table[calc_table_index(0, 1)], &queue_tail);
   test_mark(-1, 0, arc_start, arc_end, min_angle_table[calc_table_index(-1, 0)],
-            max_angle_table[calc_table_index(-1, 0)], &queue_head, &queue_tail);
+            max_angle_table[calc_table_index(-1, 0)], &queue_tail);
   test_mark(0, -1, arc_start, arc_end, min_angle_table[calc_table_index(0, -1)],
-            max_angle_table[calc_table_index(0, -1)], &queue_head, &queue_tail);
+            max_angle_table[calc_table_index(0, -1)], &queue_tail);
 
   while (queue_head != queue_tail) {
     // Dequeue one item
@@ -248,11 +290,11 @@ void fov_compute(Map *map, int origin_x, int origin_y, int radius) {
         }
 
         test_mark(child1_x, child1_y, min_lit_angle, max_lit_angle, min_angle,
-                  outer_angle, &queue_head, &queue_tail);
+                  outer_angle, &queue_tail);
 
         if (outer_angle2 != 0) {
           test_mark(child2_x, child2_y, min_lit_angle, max_lit_angle,
-                    outer_angle, outer_angle2, &queue_head, &queue_tail);
+                    outer_angle, outer_angle2, &queue_tail);
 
           int child3_x = 0, child3_y = 0;
           if (cur_x != 0 && cur_y != 0) {
@@ -274,10 +316,10 @@ void fov_compute(Map *map, int origin_x, int origin_y, int radius) {
           }
 
           test_mark(child3_x, child3_y, min_lit_angle, max_lit_angle,
-                    outer_angle2, max_angle, &queue_head, &queue_tail);
+                    outer_angle2, max_angle, &queue_tail);
         } else {
           test_mark(child2_x, child2_y, min_lit_angle, max_lit_angle,
-                    outer_angle, max_angle, &queue_head, &queue_tail);
+                    outer_angle, max_angle, &queue_tail);
         }
       } else if (min_lit_angle == min_angle) {
         // Cell is opaque - pass infinitely narrow ray to first corner
@@ -299,60 +341,8 @@ void fov_compute(Map *map, int origin_x, int origin_y, int radius) {
           child1_y = cur_y - 1; // quadrant 4
         }
 
-        mark(child1_x, child1_y, min_angle, min_angle, &queue_head,
-             &queue_tail);
+        mark(child1_x, child1_y, min_angle, min_angle, &queue_tail);
       }
     }
-  }
-}
-
-// Add light to a tile and enqueue it if not already queued
-static void mark(int x, int y, int min, int max, int *queue_head_ptr,
-                 int *queue_tail_ptr) {
-  int table_index = calc_table_index(x, y);
-  int min_lit = min_lit_table[table_index];
-  int max_lit = max_lit_table[table_index];
-
-  if (min_lit == 0 && max_lit == 0) {
-    // No light - not in queue, so add it
-    queue_x[*queue_tail_ptr] = x;
-    queue_y[*queue_tail_ptr] = y;
-    *queue_tail_ptr = (*queue_tail_ptr + 1) % QUEUE_LENGTH;
-
-    min_lit_table[table_index] = min;
-    max_lit_table[table_index] = max;
-  } else {
-    // Already in queue - expand lighting range
-    if (min < min_lit) {
-      min_lit_table[table_index] = min;
-    }
-    if (max > max_lit) {
-      max_lit_table[table_index] = max;
-    }
-  }
-}
-
-// Test if we can add light to a tile
-static void test_mark(int x, int y, int min_lit_angle, int max_lit_angle,
-                      int min_angle, int max_angle, int *queue_head_ptr,
-                      int *queue_tail_ptr) {
-  if (min_lit_angle > max_lit_angle) {
-    // Passing light along anomaly axis
-    mark(x, y, min_angle, max_angle, queue_head_ptr, queue_tail_ptr);
-  } else if (max_angle < min_lit_angle || min_angle > max_lit_angle) {
-    // Lightable area is outside the lighting
-    return;
-  } else if (min_angle <= min_lit_angle && max_lit_angle <= max_angle) {
-    // Lightable area contains the lighting
-    mark(x, y, min_lit_angle, max_lit_angle, queue_head_ptr, queue_tail_ptr);
-  } else if (min_angle >= min_lit_angle && max_lit_angle >= max_angle) {
-    // Lightable area contained by the lighting
-    mark(x, y, min_angle, max_angle, queue_head_ptr, queue_tail_ptr);
-  } else if (min_angle >= min_lit_angle && max_lit_angle <= max_angle) {
-    // Least of lightable area overlaps greatest of lighting
-    mark(x, y, min_angle, max_lit_angle, queue_head_ptr, queue_tail_ptr);
-  } else if (min_angle <= min_lit_angle && max_lit_angle >= max_angle) {
-    // Greatest of lightable area overlaps least of lighting
-    mark(x, y, min_lit_angle, max_angle, queue_head_ptr, queue_tail_ptr);
   }
 }

@@ -12,14 +12,6 @@
 #include "turn_queue.h"
 #include "world.h"
 
-static void update_player_fov(void) {
-  EntityIndex player_idx = entity_handle_to_index(WORLD.player);
-  if (entity_has(player_idx, position)) {
-    Position *pos = &WORLD.position[player_idx];
-    fov_compute(&WORLD.map, pos->x, pos->y, PLAYER_FOV_RADIUS);
-  }
-}
-
 static void particle_emit_system_tick() {
   world_query(i, BITS(particle_emitter)) {
     EntityIndex pos_index = get_position_ancestor(i);
@@ -103,7 +95,7 @@ void game_init(WorldState *world, uint64_t rng_seed) {
   spawn_monster();
 
   // Compute initial FOV for player
-  update_player_fov();
+  on_player_moved();
 
   // Generate test messages
   output_message("Welcome to the dungeon!");
@@ -215,7 +207,7 @@ void game_frame(WorldState *world, double dt) {
 
   // Advance action animation
   if (WORLD.anim.type != ACTION_ANIM_NONE) {
-    const double ANIM_DURATION = 0.15; // 150ms per action
+    const double ANIM_DURATION = 0.1; // 100ms per action
     WORLD.anim.progress += dt / ANIM_DURATION;
 
     if (WORLD.anim.progress >= 1.0) {
@@ -253,9 +245,11 @@ void game_input(WorldState *world, InputCommand command) {
 }
 
 // Helper to calculate darkness at a tile center for torch lighting
-static uint8_t calc_tile_darkness(Map *map, int tile_x, int tile_y, float player_x, float player_y) {
+static uint8_t calc_tile_darkness(Map *map, int tile_x, int tile_y,
+                                  float player_x, float player_y) {
   // Out of bounds
-  if (tile_x < 0 || tile_x >= map->width || tile_y < 0 || tile_y >= map->height) {
+  if (tile_x < 0 || tile_x >= map->width || tile_y < 0 ||
+      tile_y >= map->height) {
     return 192; // Full darkness
   }
 
@@ -284,8 +278,11 @@ static uint8_t calc_tile_darkness(Map *map, int tile_x, int tile_y, float player
   return 192; // Beyond torch radius - full darkness
 }
 
-// Helper to calculate darkness at a corner by averaging surrounding tile centers
-static uint8_t calc_corner_darkness(Map *map, int tile_x, int tile_y, int corner_x, int corner_y, float player_x, float player_y) {
+// Helper to calculate darkness at a corner by averaging surrounding tile
+// centers
+static uint8_t calc_corner_darkness(Map *map, int tile_x, int tile_y,
+                                    int corner_x, int corner_y, float player_x,
+                                    float player_y) {
   // Sample the 4 neighboring tiles around this corner
   // corner_x and corner_y are 0 or 1, indicating which corner of the tile
   int nx0 = tile_x + corner_x - 1;
@@ -367,18 +364,29 @@ void game_render(WorldState *world, RenderContext *ctx) {
         geobuilder_tile(&geom, tile, screen_x, screen_y);
 
         // Check if this tile is visible
-        bool tile_visible = world->map.cells[tile_y * MAP_WIDTH_MAX + tile_x].visible;
+        bool tile_visible =
+            world->map.cells[tile_y * MAP_WIDTH_MAX + tile_x].visible;
 
         if (tile_visible) {
-          // Check if this tile has any lighting (to decide if we need expensive corner sampling)
-          uint8_t tile_darkness = calc_tile_darkness(&world->map, tile_x, tile_y, player_tile_x, player_tile_y);
+          // Check if this tile has any lighting (to decide if we need expensive
+          // corner sampling)
+          uint8_t tile_darkness = calc_tile_darkness(
+              &world->map, tile_x, tile_y, player_tile_x, player_tile_y);
 
           if (tile_darkness < 192) {
             // Tile has some lighting - do full corner interpolation
-            uint8_t tl_alpha = calc_corner_darkness(&world->map, tile_x, tile_y, 0, 0, player_tile_x, player_tile_y);
-            uint8_t tr_alpha = calc_corner_darkness(&world->map, tile_x, tile_y, 1, 0, player_tile_x, player_tile_y);
-            uint8_t bl_alpha = calc_corner_darkness(&world->map, tile_x, tile_y, 0, 1, player_tile_x, player_tile_y);
-            uint8_t br_alpha = calc_corner_darkness(&world->map, tile_x, tile_y, 1, 1, player_tile_x, player_tile_y);
+            uint8_t tl_alpha =
+                calc_corner_darkness(&world->map, tile_x, tile_y, 0, 0,
+                                     player_tile_x, player_tile_y);
+            uint8_t tr_alpha =
+                calc_corner_darkness(&world->map, tile_x, tile_y, 1, 0,
+                                     player_tile_x, player_tile_y);
+            uint8_t bl_alpha =
+                calc_corner_darkness(&world->map, tile_x, tile_y, 0, 1,
+                                     player_tile_x, player_tile_y);
+            uint8_t br_alpha =
+                calc_corner_darkness(&world->map, tile_x, tile_y, 1, 1,
+                                     player_tile_x, player_tile_y);
 
             // Draw darkness overlay with per-vertex colors
             Color tl = {0, 0, 0, tl_alpha};

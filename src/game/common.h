@@ -3,24 +3,15 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-// Quake 3 fast inverse square root
-static inline float rsqrt(float number) {
-  float x2 = number * 0.5f;
-  float y = number;
-  int32_t i = *(int32_t *)&y; // evil floating point bit level hacking
-  i = 0x5f3759df - (i >> 1);  // what the fuck?
-  y = *(float *)&i;
-  y = y * (1.5f - (x2 * y * y)); // 1st iteration
-  y = y * (1.5f - (x2 * y * y)); // 2nd iteration, this can be removed
-  return y;
-}
-
 // For freestanding WASM builds, use compiler builtins instead of libc
 #ifdef __wasm__
 #define NULL ((void *)0)
 #define sqrtf __builtin_sqrt
+#define sqrt __builtin_sqrt
 #define sinf __builtin_sin
+#define sin __builtin_sin
 #define cosf __builtin_cos
+#define cos __builtin_cos
 #define atan2f __builtin_atan2
 #define atan2 __builtin_atan2
 #define memcpy __builtin_memcpy
@@ -61,6 +52,32 @@ extern void js_log(LogLevel level, const char *message);
 #define M_PI 3.14159265358979323846
 #endif
 
+// Quake 3 fast inverse square root
+static inline float rsqrt(float number) {
+  float x2 = number * 0.5f;
+  float y = number;
+  int32_t i = *(int32_t *)&y; // evil floating point bit level hacking
+  i = 0x5f3759df - (i >> 1);  // what the fuck?
+  y = *(float *)&i;
+  y = y * (1.5f - (x2 * y * y)); // 1st iteration
+  y = y * (1.5f - (x2 * y * y)); // 2nd iteration, this can be removed
+  return y;
+}
+
+static inline int clamp_int(int i, int min, int max) {
+  if (i < min) {
+    return min;
+  }
+  if (i > max) {
+    return max;
+  }
+  return i;
+}
+
+// ============================================================================
+// Elementary entity support
+// ============================================================================
+
 #define MAX_ENTITIES 4096
 
 typedef uint16_t EntityIndex;
@@ -74,15 +91,9 @@ static inline bool entity_handle_equals(EntityHandle a, EntityHandle b) {
   return *(uint32_t *)&a == *(uint32_t *)&b;
 }
 
-static inline int clamp_int(int i, int min, int max) {
-  if (i < min) {
-    return min;
-  }
-  if (i > max) {
-    return max;
-  }
-  return i;
-}
+// ============================================================================
+// Direction
+// ============================================================================
 
 typedef enum {
   DIR_N,

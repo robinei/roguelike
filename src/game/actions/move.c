@@ -2,6 +2,14 @@
 #include "../world.h"
 #include "actions.h"
 
+void on_player_moved(void) {
+  EntityIndex player_idx = entity_handle_to_index(WORLD.player);
+  if (entity_has(player_idx, position)) {
+    Position *pos = &WORLD.position[player_idx];
+    fov_compute(&WORLD.map, pos->x, pos->y, PLAYER_FOV_RADIUS);
+  }
+}
+
 void action_move(EntityIndex entity, Direction dir) {
   if (!entity_has(entity, position)) {
     return;
@@ -34,8 +42,5 @@ void action_move(EntityIndex entity, Direction dir) {
 
   *pos = (Position){x, y};
 
-  // Update FOV if player moved
-  if (entity_is_player(entity)) {
-    fov_compute(&WORLD.map, x, y, PLAYER_FOV_RADIUS);
-  }
+  on_player_moved();
 }
