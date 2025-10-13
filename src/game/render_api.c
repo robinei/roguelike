@@ -115,6 +115,41 @@ void geobuilder_rect(GeometryBuilder *geom, int x, int y, int w, int h,
   geobuilder_quad(geom, x0, y0, x1, y1, color, u, v, u, v);
 }
 
+void geobuilder_rect_colored(GeometryBuilder *geom, int x, int y, int w, int h,
+                              Color tl, Color tr, Color bl, Color br) {
+  RenderContext *ctx = geom->ctx;
+
+  // Calculate white tile position in atlas
+  int atlas_cols =
+      (ctx->atlas_width_px - TILE_PADDING) / (TILE_SIZE + TILE_PADDING);
+  int tile_x = WHITE_TILE_INDEX % atlas_cols;
+  int tile_y = WHITE_TILE_INDEX / atlas_cols;
+  int atlas_x = TILE_PADDING + tile_x * (TILE_SIZE + TILE_PADDING);
+  int atlas_y = TILE_PADDING + tile_y * (TILE_SIZE + TILE_PADDING);
+
+  // Sample center pixel of white tile to avoid edge artifacts
+  float u = (atlas_x + TILE_SIZE / 2.0f) / ctx->atlas_width_px;
+  float v = (atlas_y + TILE_SIZE / 2.0f) / ctx->atlas_height_px;
+
+  // Screen coordinates
+  float x0 = (float)x;
+  float y0 = (float)y;
+  float x1 = (float)(x + w);
+  float y1 = (float)(y + h);
+
+  geobuilder_flush_if_full(geom, 6);
+
+  // Triangle 1: top-left, top-right, bottom-left
+  geobuilder_vert(geom, x0, y0, tl, u, v);
+  geobuilder_vert(geom, x1, y0, tr, u, v);
+  geobuilder_vert(geom, x0, y1, bl, u, v);
+
+  // Triangle 2: bottom-left, top-right, bottom-right
+  geobuilder_vert(geom, x0, y1, bl, u, v);
+  geobuilder_vert(geom, x1, y0, tr, u, v);
+  geobuilder_vert(geom, x1, y1, br, u, v);
+}
+
 void geobuilder_text(GeometryBuilder *geom, int x, int y, TextAlign align,
                      Color bg_color, const char *fmt, ...) {
   char text[256];

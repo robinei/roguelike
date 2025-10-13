@@ -5,7 +5,7 @@
 // Spiral Path FOV algorithm
 // Adapted from: http://www.roguebasin.com/index.php?title=Spiral_Path_FOV
 
-#define PLAYER_FOV_RADIUS 64
+#define PLAYER_FOV_RADIUS 20
 #define PLAYER_TORCH_RADIUS 20
 
 // Compute field of view from origin position

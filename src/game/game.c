@@ -252,6 +252,59 @@ void game_input(WorldState *world, InputCommand command) {
   WORLD.next_player_input = command;
 }
 
+// Helper to calculate darkness at a tile center for torch lighting
+static uint8_t calc_tile_darkness(Map *map, int tile_x, int tile_y, float player_x, float player_y) {
+  // Out of bounds
+  if (tile_x < 0 || tile_x >= map->width || tile_y < 0 || tile_y >= map->height) {
+    return 192; // Full darkness
+  }
+
+  if (!map->cells[tile_y * MAP_WIDTH_MAX + tile_x].visible) {
+    return 192; // Non-visible: full darkness
+  }
+
+  // Visible - calculate torch lighting based on distance from tile center
+  float tx = tile_x + 0.5f;
+  float ty = tile_y + 0.5f;
+  float dx = tx - player_x;
+  float dy = ty - player_y;
+  float dist_sq = dx * dx + dy * dy;
+
+  if (dist_sq < 0.01f) {
+    return 0; // At player position - no darkness
+  }
+
+  float dist = 1.0f / rsqrt(dist_sq);
+
+  if (dist < PLAYER_TORCH_RADIUS) {
+    float fade = dist / PLAYER_TORCH_RADIUS;
+    return (uint8_t)(fade * 192.0f);
+  }
+
+  return 192; // Beyond torch radius - full darkness
+}
+
+// Helper to calculate darkness at a corner by averaging surrounding tile centers
+static uint8_t calc_corner_darkness(Map *map, int tile_x, int tile_y, int corner_x, int corner_y, float player_x, float player_y) {
+  // Sample the 4 neighboring tiles around this corner
+  // corner_x and corner_y are 0 or 1, indicating which corner of the tile
+  int nx0 = tile_x + corner_x - 1;
+  int ny0 = tile_y + corner_y - 1;
+  int nx1 = tile_x + corner_x;
+  int ny1 = tile_y + corner_y - 1;
+  int nx2 = tile_x + corner_x - 1;
+  int ny2 = tile_y + corner_y;
+  int nx3 = tile_x + corner_x;
+  int ny3 = tile_y + corner_y;
+
+  int sum = calc_tile_darkness(map, nx0, ny0, player_x, player_y) +
+            calc_tile_darkness(map, nx1, ny1, player_x, player_y) +
+            calc_tile_darkness(map, nx2, ny2, player_x, player_y) +
+            calc_tile_darkness(map, nx3, ny3, player_x, player_y);
+
+  return (uint8_t)(sum / 4);
+}
+
 void game_render(WorldState *world, RenderContext *ctx) {
   active_world = world;
 
@@ -299,7 +352,7 @@ void game_render(WorldState *world, RenderContext *ctx) {
   float player_tile_x = camera_center_x;
   float player_tile_y = camera_center_y;
 
-  // Draw visible tiles with torch lighting
+  // Draw visible tiles with interpolated torch lighting
   int screen_y = -offset_y;
   for (int tile_y = start_tile_y; screen_y < ctx->viewport_height_px;
        tile_y++) {
@@ -313,36 +366,36 @@ void game_render(WorldState *world, RenderContext *ctx) {
         int tile = world->map.cells[tile_y * MAP_WIDTH_MAX + tile_x].tile;
         geobuilder_tile(&geom, tile, screen_x, screen_y);
 
-        // Calculate darkness overlay based on visibility and distance from
-        // player
-        uint8_t darkness_alpha = 192; // Full darkness for non-visible tiles
+        // Check if this tile is visible
+        bool tile_visible = world->map.cells[tile_y * MAP_WIDTH_MAX + tile_x].visible;
 
-        if (world->map.cells[tile_y * MAP_WIDTH_MAX + tile_x].visible) {
-          // Visible tile - calculate torch lighting based on distance
-          float dx = tile_x - player_tile_x;
-          float dy = tile_y - player_tile_y;
-          float dist_sq = dx * dx + dy * dy;
+        if (tile_visible) {
+          // Check if this tile has any lighting (to decide if we need expensive corner sampling)
+          uint8_t tile_darkness = calc_tile_darkness(&world->map, tile_x, tile_y, player_tile_x, player_tile_y);
 
-          if (dist_sq > 0.01f) {
-            float dist = 1.0f / rsqrt(dist_sq);
+          if (tile_darkness < 192) {
+            // Tile has some lighting - do full corner interpolation
+            uint8_t tl_alpha = calc_corner_darkness(&world->map, tile_x, tile_y, 0, 0, player_tile_x, player_tile_y);
+            uint8_t tr_alpha = calc_corner_darkness(&world->map, tile_x, tile_y, 1, 0, player_tile_x, player_tile_y);
+            uint8_t bl_alpha = calc_corner_darkness(&world->map, tile_x, tile_y, 0, 1, player_tile_x, player_tile_y);
+            uint8_t br_alpha = calc_corner_darkness(&world->map, tile_x, tile_y, 1, 1, player_tile_x, player_tile_y);
 
-            // Fade from 0 (no darkness) at player position to 192 (full
-            // darkness) at torch radius
-            if (dist < PLAYER_TORCH_RADIUS) {
-              float fade = dist / PLAYER_TORCH_RADIUS;
-              darkness_alpha = (uint8_t)(fade * 192.0f);
-            }
-            // else: beyond torch radius, use full darkness (192)
+            // Draw darkness overlay with per-vertex colors
+            Color tl = {0, 0, 0, tl_alpha};
+            Color tr = {0, 0, 0, tr_alpha};
+            Color bl = {0, 0, 0, bl_alpha};
+            Color br = {0, 0, 0, br_alpha};
+            geobuilder_rect_colored(&geom, screen_x, screen_y, ctx->tile_size,
+                                    ctx->tile_size, tl, tr, bl, br);
           } else {
-            // At player position - no darkness
-            darkness_alpha = 0;
+            // Tile is visible but outside torch radius - uniform darkness
+            geobuilder_rect(&geom, screen_x, screen_y, ctx->tile_size,
+                            ctx->tile_size, (Color){0, 0, 0, 192});
           }
-        }
-
-        // Draw darkness overlay if needed
-        if (darkness_alpha > 0) {
+        } else {
+          // Non-visible tile - draw uniform full darkness
           geobuilder_rect(&geom, screen_x, screen_y, ctx->tile_size,
-                          ctx->tile_size, (Color){0, 0, 0, darkness_alpha});
+                          ctx->tile_size, (Color){0, 0, 0, 192});
         }
       }
       screen_x += ctx->tile_size;
