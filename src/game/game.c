@@ -362,6 +362,16 @@ void game_render(WorldState *world, RenderContext *ctx) {
   int offset_x = (int)(viewport_left_px - start_tile_x * ctx->tile_size);
   int offset_y = (int)(viewport_top_px - start_tile_y * ctx->tile_size);
 
+  // Calculate chaotic torch flicker using combined non-linear waves
+  float t = WORLD.particle_time;
+  float s1 = sinf(t * 3.1f);
+  float s2 = sinf(t * 7.3f);
+  float s3 = sinf(t * 13.7f);
+  // Combine with non-linear mixing for chaotic effect
+  float flicker = 0.85f + 0.08f * s1 +
+                  0.04f * s2 * s2 + // Squared for non-linearity
+                  0.03f * s1 * s3;  // Cross-product for chaos
+
   // Draw visible tiles with interpolated torch lighting
   int screen_y = -offset_y;
   for (int tile_y = start_tile_y; screen_y < ctx->viewport_height_px;
@@ -400,6 +410,16 @@ void game_render(WorldState *world, RenderContext *ctx) {
             uint8_t br_light =
                 calc_corner_light(&world->map, tile_x, tile_y, 1, 1,
                                   player_tile_x, player_tile_y);
+
+            // Apply flicker to light values (only in lit areas)
+            tl_light = tl_light > 63 ? (uint8_t)(63 + (tl_light - 63) * flicker)
+                                     : tl_light;
+            tr_light = tr_light > 63 ? (uint8_t)(63 + (tr_light - 63) * flicker)
+                                     : tr_light;
+            bl_light = bl_light > 63 ? (uint8_t)(63 + (bl_light - 63) * flicker)
+                                     : bl_light;
+            br_light = br_light > 63 ? (uint8_t)(63 + (br_light - 63) * flicker)
+                                     : br_light;
 
             // Draw darkness overlay with per-vertex colors (255 - light)
             Color tl = {0, 0, 0, (uint8_t)(255 - tl_light)};
