@@ -24,6 +24,8 @@ const InputCommand = {
   LEFT: 7,
   UP_LEFT: 8,
   PERIOD: 9,
+  R: 10,
+  D: 11,
 };
 
 // WebGL shader sources
@@ -310,6 +312,7 @@ function setupInput() {
     'b': InputCommand.DOWN_LEFT,
     'n': InputCommand.DOWN_RIGHT,
     '.': InputCommand.PERIOD,
+    'd': InputCommand.D,
   };
 
   document.addEventListener('keydown', (e) => {

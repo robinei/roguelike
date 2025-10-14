@@ -136,34 +136,55 @@ void geobuilder_rect_colored(GeometryBuilder *geom, int x, int y, int w, int h,
   float y0 = (float)y;
   float x1 = (float)(x + w);
   float y1 = (float)(y + h);
+  float xc = (x0 + x1) / 2.0f; // center x
+  float yc = (y0 + y1) / 2.0f; // center y
 
-  geobuilder_flush_if_full(geom, 6);
+  // Center color is average of all 4 corners
+  Color center = {
+    (uint8_t)((tl.r + tr.r + bl.r + br.r) / 4),
+    (uint8_t)((tl.g + tr.g + bl.g + br.g) / 4),
+    (uint8_t)((tl.b + tr.b + bl.b + br.b) / 4),
+    (uint8_t)((tl.a + tr.a + bl.a + br.a) / 4)
+  };
 
-  // Triangle 1: top-left, top-right, bottom-left
+  geobuilder_flush_if_full(geom, 12); // 4 triangles = 12 vertices
+
+  // Triangle 1: top (center, top-left, top-right)
+  geobuilder_vert(geom, xc, yc, center, u, v);
   geobuilder_vert(geom, x0, y0, tl, u, v);
   geobuilder_vert(geom, x1, y0, tr, u, v);
-  geobuilder_vert(geom, x0, y1, bl, u, v);
 
-  // Triangle 2: bottom-left, top-right, bottom-right
-  geobuilder_vert(geom, x0, y1, bl, u, v);
+  // Triangle 2: right (center, top-right, bottom-right)
+  geobuilder_vert(geom, xc, yc, center, u, v);
   geobuilder_vert(geom, x1, y0, tr, u, v);
   geobuilder_vert(geom, x1, y1, br, u, v);
+
+  // Triangle 3: bottom (center, bottom-right, bottom-left)
+  geobuilder_vert(geom, xc, yc, center, u, v);
+  geobuilder_vert(geom, x1, y1, br, u, v);
+  geobuilder_vert(geom, x0, y1, bl, u, v);
+
+  // Triangle 4: left (center, bottom-left, top-left)
+  geobuilder_vert(geom, xc, yc, center, u, v);
+  geobuilder_vert(geom, x0, y1, bl, u, v);
+  geobuilder_vert(geom, x0, y0, tl, u, v);
 }
 
-void geobuilder_text(GeometryBuilder *geom, int x, int y, TextAlign align,
-                     Color bg_color, const char *fmt, ...) {
+void geobuilder_text(GeometryBuilder *geom, int x, int y, float scale,
+                     TextAlign align, Color bg_color, const char *fmt, ...) {
   char text[256];
   va_list args;
   va_start(args, fmt);
   vsnprnf(text, sizeof(text), fmt, args);
   va_end(args);
 
-  int tile_size = geom->ctx->tile_size;
+  RenderContext *ctx = geom->ctx;
+  int char_size = (int)(ctx->tile_size * scale);
 
   // Calculate text width
   int text_width = 0;
   for (const char *p = text; *p; p++) {
-    text_width += tile_size;
+    text_width += char_size;
   }
 
   // Adjust x for right alignment
@@ -171,14 +192,40 @@ void geobuilder_text(GeometryBuilder *geom, int x, int y, TextAlign align,
 
   // Draw background if alpha > 0
   if (bg_color.a > 0) {
-    geobuilder_rect(geom, draw_x, y, text_width, tile_size, bg_color);
+    geobuilder_rect(geom, draw_x, y, text_width, char_size, bg_color);
   }
 
   // Draw text
   int char_x = draw_x;
   for (const char *p = text; *p; p++) {
     unsigned char ch = (unsigned char)*p;
-    geobuilder_tile(geom, FONT_BASE_INDEX + ch, char_x, y);
-    char_x += tile_size;
+
+    // Calculate tile position in atlas (with padding)
+    int atlas_cols =
+        (ctx->atlas_width_px - TILE_PADDING) / (TILE_SIZE + TILE_PADDING);
+    int tile_index = FONT_BASE_INDEX + ch;
+    int tile_x = tile_index % atlas_cols;
+    int tile_y = tile_index / atlas_cols;
+    int atlas_x = TILE_PADDING + tile_x * (TILE_SIZE + TILE_PADDING);
+    int atlas_y = TILE_PADDING + tile_y * (TILE_SIZE + TILE_PADDING);
+
+    // Calculate texture coordinates (0-1 range)
+    float u0 = (float)atlas_x / ctx->atlas_width_px;
+    float v0 = (float)atlas_y / ctx->atlas_height_px;
+    float u1 = (float)(atlas_x + TILE_SIZE) / ctx->atlas_width_px;
+    float v1 = (float)(atlas_y + TILE_SIZE) / ctx->atlas_height_px;
+
+    // Screen coordinates with custom size
+    float x0 = (float)char_x;
+    float y0 = (float)y;
+    float x1 = (float)(char_x + char_size);
+    float y1 = (float)(y + char_size);
+
+    // White color for textured quads (texture colors pass through)
+    Color white = {255, 255, 255, 255};
+
+    geobuilder_quad(geom, x0, y0, x1, y1, white, u0, v0, u1, v1);
+
+    char_x += char_size;
   }
 }

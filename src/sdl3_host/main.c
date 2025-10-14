@@ -238,6 +238,8 @@ static InputCommand map_key_to_command(SDL_Keycode key) {
     return INPUT_CMD_DOWN_RIGHT;
   case SDLK_PERIOD:
     return INPUT_CMD_PERIOD;
+  case SDLK_D:
+    return INPUT_CMD_D;
   default:
     return INPUT_CMD_NONE; // Invalid
   }

@@ -107,7 +107,8 @@ typedef enum {
   TEXT_ALIGN_RIGHT,
 } TextAlign;
 
-// Draw formatted text with optional background
+// Draw formatted text with optional background and scale
 // If bg_color alpha is 0, no background is drawn
-void geobuilder_text(GeometryBuilder *geom, int x, int y, TextAlign align,
-                     Color bg_color, const char *fmt, ...);
+// scale: 1.0 = tile_size, 0.5 = half size, etc.
+void geobuilder_text(GeometryBuilder *geom, int x, int y, float scale,
+                     TextAlign align, Color bg_color, const char *fmt, ...);

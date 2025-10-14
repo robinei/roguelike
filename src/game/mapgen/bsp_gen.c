@@ -67,15 +67,15 @@ static void split_region(BSPNode *node, int depth, const BSPGenParams *params) {
     int max_split = node->height - params->min_child_size;
     if (max_split <= params->min_child_size)
       return; // Can't split
-    split_pos =
-        params->min_child_size + (random64() % (max_split - params->min_child_size));
+    split_pos = params->min_child_size +
+                (random64() % (max_split - params->min_child_size));
   } else {
     // Split vertically (left/right)
     int max_split = node->width - params->min_child_size;
     if (max_split <= params->min_child_size)
       return; // Can't split
-    split_pos =
-        params->min_child_size + (random64() % (max_split - params->min_child_size));
+    split_pos = params->min_child_size +
+                (random64() % (max_split - params->min_child_size));
   }
 
   node->split_pos = split_pos;
@@ -117,10 +117,10 @@ static void create_room(BSPNode *node, const BSPGenParams *params) {
   }
 
   // Random room size
-  node->room_width =
-      params->min_room_size + (random64() % (max_width - params->min_room_size + 1));
-  node->room_height =
-      params->min_room_size + (random64() % (max_height - params->min_room_size + 1));
+  node->room_width = params->min_room_size +
+                     (random64() % (max_width - params->min_room_size + 1));
+  node->room_height = params->min_room_size +
+                      (random64() % (max_height - params->min_room_size + 1));
 
   // Random position within the region (with padding)
   int max_x = node->width - node->room_width - padding;
@@ -253,8 +253,7 @@ void mapgen_bsp(Map *map, const BSPGenParams *params) {
 
   // Create root node with border around the map edge
   int border = params->map_border;
-  BSPNode *root = alloc_node(border, border,
-                             map->width - border * 2,
+  BSPNode *root = alloc_node(border, border, map->width - border * 2,
                              map->height - border * 2);
   if (!root)
     return;

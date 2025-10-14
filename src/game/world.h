@@ -97,6 +97,7 @@ typedef enum {
 
   INPUT_CMD_PERIOD,
   INPUT_CMD_R,
+  INPUT_CMD_D,
 } InputCommand;
 
 // ============================================================================
@@ -153,10 +154,14 @@ typedef struct {
   double frame_time_accumulator;
   uint32_t frame_count;
   float fps;
+
+  // Debug flags
+  bool debug_show_light_values;
 } WorldState;
 
 extern WorldState *active_world;
 #define WORLD (*active_world)
+#define MAP(x, y) WORLD.map.cells[(y) * MAP_WIDTH_MAX + (x)]
 
 // query all world entities using BITS with component names to form a bitwise
 // expression on bitset words

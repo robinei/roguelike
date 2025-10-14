@@ -22,7 +22,7 @@ void action_move(EntityIndex entity, Direction dir) {
     return;
   }
 
-  if (!WORLD.map.cells[y * MAP_WIDTH_MAX + x].passable) {
+  if (!MAP(x, y).passable) {
     return;
   }
 
