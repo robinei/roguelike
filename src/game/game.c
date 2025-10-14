@@ -2,6 +2,7 @@
 #include "actions/actions.h"
 #include "common.h"
 #include "components.h"
+#include "flood.h"
 #include "fov.h"
 #include "map.h"
 #include "mapgen/mapgen.h"
@@ -73,8 +74,8 @@ void game_init(WorldState *world, uint64_t rng_seed) {
   turn_queue_insert(turn_index, TURN_INTERVAL);
 
   // Generate map before spawning entities
-  WORLD.map.width = 128;
-  WORLD.map.height = 128;
+  WORLD.map.width = 64;
+  WORLD.map.height = 64;
 
   BSPGenParams bsp_params = {
       .max_depth = 5,        // More depth = more rooms
@@ -83,7 +84,7 @@ void game_init(WorldState *world, uint64_t rng_seed) {
       .split_threshold = 14, // Split along longer axis if above this
       .min_room_size = 4,    // Minimum room dimensions
       .room_padding = 2,     // Padding around rooms within regions
-      .map_border = 1,       // Keep 1 tile away from map edge
+      .map_border = 0,       // Keep 1 tile away from map edge
   };
   mapgen_bsp(&WORLD.map, &bsp_params);
 
@@ -97,31 +98,41 @@ void game_init(WorldState *world, uint64_t rng_seed) {
   // Compute initial FOV for player
   on_player_moved();
 
-  // Generate test messages
-  output_message("Welcome to the dungeon!");
-  output_message("You hear strange noises in the distance.");
-  output_message("A cold wind blows through the corridor.");
-  output_message("You find a rusty sword lying on the ground.");
-  output_message("The walls are covered in ancient runes.");
-  output_message("You step on something crunchy.");
-  output_message("A rat scurries past your feet.");
-  output_message("The air smells of decay and mold.");
-  output_message("You hear dripping water somewhere nearby.");
-  output_message("Your torch flickers ominously.");
-  output_message("You feel like you're being watched.");
-  output_message("The door ahead is locked.");
-  output_message("You found a key!");
-  output_message("The key fits the lock perfectly.");
-  output_message("The door creaks open slowly.");
-  output_message("You enter a large chamber.");
-  output_message("Something growls in the darkness.");
-  output_message("Roll for initiative!");
+  // Clear all water first
+  memset(WORLD.map.water, 0, sizeof(WORLD.map.water));
+
+  // Initialize water at map edges (passable edge tiles start with water)
+  int edge_passable_count = 0;
+  for (int y = 0; y < WORLD.map.height; y++) {
+    for (int x = 0; x < WORLD.map.width; x++) {
+      bool is_edge = (x == 0 || x == WORLD.map.width - 1 || y == 0 ||
+                      y == WORLD.map.height - 1);
+      if (is_edge) {
+        MapCell *cell = &WORLD.map.cells[y * MAP_WIDTH_MAX + x];
+        if (cell->passable) {
+          WORLD.map.water[y * MAP_WIDTH_MAX + x].water_depth = 255;
+          edge_passable_count++;
+        }
+      }
+    }
+  }
+  output_message("Found %d passable edge tiles", edge_passable_count);
 }
 
 static void game_tick(WorldState *world, uint64_t tick) {
   active_world = world;
-  (void)tick; // Unused for now
   particle_emit_system_tick();
+
+  // Run flood simulation
+  flood_simulate_step(&world->map);
+
+  // Debug: output every 10 ticks
+  if (tick % 10 == 0) {
+    // Sample a water tile to see if it's changing
+    int sample_idx = 1 * MAP_WIDTH_MAX + 30;
+    output_message("Tick %d: water[1,30]=%d", (int)tick,
+                   world->map.water[sample_idx].water_depth);
+  }
 }
 
 static void process_turn_entity(void) {
@@ -429,7 +440,7 @@ void game_render(WorldState *world, RenderContext *ctx) {
             geobuilder_rect_colored(&geom, screen_x, screen_y, ctx->tile_size,
                                     ctx->tile_size, tl, tr, bl, br);
 
-            // Draw light value if debug mode enabled
+            // Draw debug info if enabled
             if (WORLD.debug_show_light_values) {
               geobuilder_text(&geom, screen_x + 1, screen_y + 1, 0.33f,
                               TEXT_ALIGN_LEFT, (Color){0, 0, 0, 0}, "%d",
@@ -439,17 +450,28 @@ void game_render(WorldState *world, RenderContext *ctx) {
             // Tile is visible but outside torch radius - uniform darkness
             geobuilder_rect(&geom, screen_x, screen_y, ctx->tile_size,
                             ctx->tile_size, (Color){0, 0, 0, 192});
-
-            // Draw light value for full darkness if debug mode enabled
-            if (WORLD.debug_show_light_values) {
-              geobuilder_text(&geom, screen_x + 1, screen_y + 1, 0.33f,
-                              TEXT_ALIGN_LEFT, (Color){0, 0, 0, 0}, "63");
-            }
           }
         } else {
           // Non-visible tile - draw uniform full darkness
           geobuilder_rect(&geom, screen_x, screen_y, ctx->tile_size,
                           ctx->tile_size, (Color){0, 0, 0, 192});
+        }
+
+        // Draw water overlay on ALL tiles (after lighting/darkness)
+        uint8_t water_depth =
+            world->map.water[tile_y * MAP_WIDTH_MAX + tile_x].water_depth;
+        if (water_depth > 0) {
+          uint8_t water_alpha = water_depth;
+          geobuilder_rect(&geom, screen_x, screen_y, ctx->tile_size,
+                          ctx->tile_size,
+                          (Color){0, 100, 200, water_alpha});
+
+          // Draw water debug value
+          if (WORLD.debug_show_light_values) {
+            geobuilder_text(&geom, screen_x + 1, screen_y + 1, 0.33f,
+                            TEXT_ALIGN_LEFT, (Color){0, 0, 0, 0}, "W%d",
+                            water_depth);
+          }
         }
       }
       screen_x += ctx->tile_size;
