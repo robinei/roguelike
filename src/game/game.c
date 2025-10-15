@@ -1,12 +1,12 @@
 #include "game.h"
 #include "actions/actions.h"
 #include "common.h"
-#include "components.h"
 #include "flood.h"
 #include "fov.h"
 #include "map.h"
 #include "mapgen/mapgen.h"
 #include "particles.h"
+#include "parts.h"
 #include "prnf.h"
 #include "random.h"
 #include "render_api.h"
@@ -15,15 +15,15 @@
 #include <stdint.h>
 
 static void particle_emit_system_tick() {
-  world_query(i, BITS(particle_emitter)) {
+  world_query(i, BITS(ParticleEmitter)) {
     EntityIndex pos_index = get_position_ancestor(i);
     if (!pos_index) {
       // can't spawn without position
       continue;
     }
 
-    Position *pos = WORLD.position + pos_index;
-    ParticleEmitter *pe = WORLD.particle_emitter + i;
+    Position *pos = &PART(Position, pos_index);
+    ParticleEmitter *pe = &PART(ParticleEmitter, i);
 
     if (pe->countdown_ticks > 0 && --pe->countdown_ticks == 0) {
       float x = (float)pos->x + 0.5f;
@@ -43,8 +43,8 @@ static EntityIndex spawn_player(void) {
   }
 
   EntityIndex player = entity_alloc();
-  entity_add(player, position, pos);
-  entity_add(player, health, HEALTH_FULL);
+  SET_PART(Position, player, pos);
+  SET_PART(Health, player, HEALTH_FULL);
   turn_queue_insert(player, 0);
   return player;
 }
@@ -57,8 +57,8 @@ static EntityIndex spawn_monster(void) {
   }
 
   EntityIndex monster = entity_alloc();
-  entity_add(monster, position, pos);
-  entity_add(monster, health, HEALTH_FULL);
+  SET_PART(Position, monster, pos);
+  SET_PART(Health, monster, HEALTH_FULL);
   turn_queue_insert(monster, 0);
   return monster;
 }
@@ -71,7 +71,7 @@ void game_init(WorldState *world, uint64_t rng_seed) {
   entity_alloc();
 
   EntityIndex turn_index = entity_alloc();
-  world->turn_entity = entity_handle_from_index(turn_index);
+  WORLD.entities.turn = entity_handle_from_index(turn_index);
   turn_queue_insert(turn_index, TURN_INTERVAL);
 
   // Generate map before spawning entities
@@ -90,7 +90,7 @@ void game_init(WorldState *world, uint64_t rng_seed) {
   mapgen_bsp(&WORLD.map, &bsp_params);
 
   // Spawn player and monsters in random passable positions
-  WORLD.player = entity_handle_from_index(spawn_player());
+  WORLD.entities.player = entity_handle_from_index(spawn_player());
 
   spawn_monster();
   spawn_monster();
@@ -110,22 +110,22 @@ static void game_tick(WorldState *world, uint64_t tick) {
 }
 
 static void process_turn_entity(void) {
-  EntityIndex entity = entity_handle_to_index(WORLD.turn_entity);
+  EntityIndex entity = entity_handle_to_index(WORLD.entities.turn);
   turn_queue_add_delay(entity, TURN_INTERVAL);
 
   // reduce delay for all entities by TURN_INTERVAL once each turn, to avoid
   // delay just growing endlessly. it would work even if it did grow endlessly,
   // since we just always schedule the entity with the lowest delay (remember
   // actions add their cost to the entity's delay)
-  world_query(i, BITS(turn_schedule)) {
-    WORLD.turn_schedule[i].delay -= TURN_INTERVAL;
+  world_query(i, BITS(TurnSchedule)) {
+    PART(TurnSchedule, i).delay -= TURN_INTERVAL;
   }
 
   // TODO: per-turn logic (regen, DOTs, cooldowns, etc.)
 }
 
 static void execute_player_action(InputCommand command) {
-  EntityIndex player = entity_handle_to_index(WORLD.player);
+  EntityIndex player = entity_handle_to_index(WORLD.entities.player);
 
   // TODO: implement actual actions
   // For now, just basic movement/wait
@@ -186,9 +186,9 @@ void game_frame(WorldState *world, double dt) {
 
   if (WORLD.anim.type != ACTION_ANIM_NONE) {
     EntityIndex actor = entity_handle_to_index(WORLD.anim.actor);
-    if (entity_has(actor, position)) {
-      int x = WORLD.position[actor].x;
-      int y = WORLD.position[actor].y;
+    if (HAS_PART(Position, actor)) {
+      int x = PART(Position, actor).x;
+      int y = PART(Position, actor).y;
       if (!MAP(x, y).visible) {
         memset(&WORLD.anim, 0, sizeof(WORLD.anim));
       }
@@ -211,14 +211,14 @@ void game_frame(WorldState *world, double dt) {
   if (WORLD.anim.type == ACTION_ANIM_NONE && WORLD.turn_queue.count > 0) {
     EntityHandle next = turn_queue_peek();
 
-    if (entity_handle_equals(next, WORLD.player)) {
+    if (entity_handle_equals(next, WORLD.entities.player)) {
       // Player's turn - do we have input?
       if (WORLD.next_player_input != INPUT_CMD_NONE) {
         execute_player_action(WORLD.next_player_input);
         WORLD.next_player_input = INPUT_CMD_NONE;
       }
       // No input? Just wait (don't pop from queue)
-    } else if (entity_handle_equals(next, WORLD.turn_entity)) {
+    } else if (entity_handle_equals(next, WORLD.entities.turn)) {
       process_turn_entity();
     } else {
       // NPC turn - will set anim if needed
@@ -268,8 +268,10 @@ static uint8_t calc_tile_light(Map *map, int tile_x, int tile_y, int player_x,
 
 // Helper to get water depth at a tile position
 // Returns fallback for out-of-bounds or impassable tiles
-static inline uint8_t get_water_depth(Map *map, int tile_x, int tile_y, uint8_t fallback) {
-  if (tile_x < 0 || tile_x >= map->width || tile_y < 0 || tile_y >= map->height) {
+static inline uint8_t get_water_depth(Map *map, int tile_x, int tile_y,
+                                      uint8_t fallback) {
+  if (tile_x < 0 || tile_x >= map->width || tile_y < 0 ||
+      tile_y >= map->height) {
     return fallback;
   }
   if (!map->cells[tile_y * MAP_WIDTH_MAX + tile_x].passable) {
@@ -280,8 +282,8 @@ static inline uint8_t get_water_depth(Map *map, int tile_x, int tile_y, uint8_t 
 
 // Helper to calculate water depth at a corner by averaging surrounding tiles
 static uint8_t calc_corner_water_depth(Map *map, int tile_x, int tile_y,
-                                        int corner_x, int corner_y,
-                                        uint8_t current_depth) {
+                                       int corner_x, int corner_y,
+                                       uint8_t current_depth) {
   // Sample the 4 tiles surrounding this corner
   // corner_x and corner_y are 0 or 1, indicating which corner of the tile
   int nx0 = tile_x + corner_x - 1;
@@ -345,14 +347,14 @@ void game_render(WorldState *world, RenderContext *ctx) {
   geobuilder_init(&geom, ctx);
 
   // Get player position for camera centering
-  EntityIndex player_idx = entity_handle_to_index(world->player);
+  EntityIndex player_idx = entity_handle_to_index(WORLD.entities.player);
   float camera_center_x = 0.0f;
   float camera_center_y = 0.0f;
   int player_tile_x = 0;
   int player_tile_y = 0;
 
-  if (entity_has(player_idx, position)) {
-    Position *pos = &world->position[player_idx];
+  if (HAS_PART(Position, player_idx)) {
+    Position *pos = &PART(Position, player_idx);
     camera_center_x = (float)pos->x;
     camera_center_y = (float)pos->y;
     player_tile_x = pos->x;
@@ -413,9 +415,9 @@ void game_render(WorldState *world, RenderContext *ctx) {
     screen_y += ctx->tile_size;
   }
 
-  // Draw entities with position component
-  world_query(i, BITS(position)) {
-    Position *pos = &WORLD.position[i];
+  // Draw entities with position
+  world_query(i, BITS(Position)) {
+    Position *pos = &PART(Position, i);
 
     // Start with entity's actual position (in tile coordinates)
     float world_x = (float)pos->x;
@@ -433,8 +435,8 @@ void game_render(WorldState *world, RenderContext *ctx) {
                entity_handle_to_index(WORLD.anim.actor) == i) {
       // Move slightly toward target and back (bump animation)
       EntityIndex target_idx = entity_handle_to_index(WORLD.anim.attack.target);
-      if (entity_has(target_idx, position)) {
-        Position *target_pos = &WORLD.position[target_idx];
+      if (HAS_PART(Position, target_idx)) {
+        Position *target_pos = &PART(Position, target_idx);
 
         // Calculate direction to target
         float dx = target_pos->x - pos->x;
@@ -466,7 +468,7 @@ void game_render(WorldState *world, RenderContext *ctx) {
     int screen_y = (int)(world_py - viewport_top_px);
 
     // For now, all entities are rendered as TILE_PLAYER
-    // TODO: Use glyph component or similar to determine tile
+    // TODO: Use glyph part or similar to determine tile
     geobuilder_tile(&geom, TILE_PLAYER, screen_x, screen_y);
   }
 
@@ -487,20 +489,29 @@ void game_render(WorldState *world, RenderContext *ctx) {
             world->map.water_depth[tile_y * MAP_WIDTH_MAX + tile_x];
         if (water_depth > 0) {
           // Check if neighbors have different depths (need interpolation)
-          uint8_t left = get_water_depth(&world->map, tile_x - 1, tile_y, water_depth);
-          uint8_t right = get_water_depth(&world->map, tile_x + 1, tile_y, water_depth);
-          uint8_t up = get_water_depth(&world->map, tile_x, tile_y - 1, water_depth);
-          uint8_t down = get_water_depth(&world->map, tile_x, tile_y + 1, water_depth);
+          uint8_t left =
+              get_water_depth(&world->map, tile_x - 1, tile_y, water_depth);
+          uint8_t right =
+              get_water_depth(&world->map, tile_x + 1, tile_y, water_depth);
+          uint8_t up =
+              get_water_depth(&world->map, tile_x, tile_y - 1, water_depth);
+          uint8_t down =
+              get_water_depth(&world->map, tile_x, tile_y + 1, water_depth);
 
-          bool needs_interpolation = (left != water_depth || right != water_depth ||
-                                      up != water_depth || down != water_depth);
+          bool needs_interpolation =
+              (left != water_depth || right != water_depth ||
+               up != water_depth || down != water_depth);
 
           if (needs_interpolation) {
             // Expensive path: corner interpolation
-            uint8_t tl_depth = calc_corner_water_depth(&world->map, tile_x, tile_y, 0, 0, water_depth);
-            uint8_t tr_depth = calc_corner_water_depth(&world->map, tile_x, tile_y, 1, 0, water_depth);
-            uint8_t bl_depth = calc_corner_water_depth(&world->map, tile_x, tile_y, 0, 1, water_depth);
-            uint8_t br_depth = calc_corner_water_depth(&world->map, tile_x, tile_y, 1, 1, water_depth);
+            uint8_t tl_depth = calc_corner_water_depth(
+                &world->map, tile_x, tile_y, 0, 0, water_depth);
+            uint8_t tr_depth = calc_corner_water_depth(
+                &world->map, tile_x, tile_y, 1, 0, water_depth);
+            uint8_t bl_depth = calc_corner_water_depth(
+                &world->map, tile_x, tile_y, 0, 1, water_depth);
+            uint8_t br_depth = calc_corner_water_depth(
+                &world->map, tile_x, tile_y, 1, 1, water_depth);
 
             uint8_t tl_alpha = tl_depth / 2;
             uint8_t tr_alpha = tr_depth / 2;

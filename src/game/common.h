@@ -1,11 +1,11 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 // For freestanding WASM builds, use compiler builtins instead of libc
 #ifdef __wasm__
-#define NULL ((void *)0)
 #define sqrtf __builtin_sqrt
 #define sqrt __builtin_sqrt
 #define sinf __builtin_sin

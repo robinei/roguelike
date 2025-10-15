@@ -8,19 +8,19 @@ static Attributes gather_attributes(EntityIndex entity,
                                     EntitySet *entity_tree) {
   Attributes attr = {0};
 
-  if (entity_has(entity, attributes)) {
-    attr = WORLD.attributes[entity];
+  if (HAS_PART(Attributes, entity)) {
+    attr = PART(Attributes, entity);
 
-    entityset_query(i, entity_tree, HAS(attributes_modifier)) {
+    entityset_query(i, entity_tree, HAS(AttributesModifier)) {
       if (get_attributes_ancestor(i) == entity) {
         attr.str =
-            clamp_int(attr.str + WORLD.attributes_modifier[i].str, 0, STR_MAX);
+            clamp_int(attr.str + PART(AttributesModifier, i).str, 0, STR_MAX);
         attr.dex =
-            clamp_int(attr.dex + WORLD.attributes_modifier[i].dex, 0, DEX_MAX);
+            clamp_int(attr.dex + PART(AttributesModifier, i).dex, 0, DEX_MAX);
         attr.wil =
-            clamp_int(attr.wil + WORLD.attributes_modifier[i].wil, 0, WIL_MAX);
+            clamp_int(attr.wil + PART(AttributesModifier, i).wil, 0, WIL_MAX);
         attr.con =
-            clamp_int(attr.con + WORLD.attributes_modifier[i].con, 0, CON_MAX);
+            clamp_int(attr.con + PART(AttributesModifier, i).con, 0, CON_MAX);
       }
     }
   } else {
@@ -55,7 +55,7 @@ void action_combat(EntityIndex attacker, EntityIndex defender) {
                    .actor = entity_handle_from_index(attacker),
                    .attack = {.target = entity_handle_from_index(defender)}};
 
-  if (attacker == entity_handle_to_index(WORLD.player)) {
+  if (attacker == entity_handle_to_index(WORLD.entities.player)) {
     output_message("You attacked!");
   }
 
@@ -64,17 +64,17 @@ void action_combat(EntityIndex attacker, EntityIndex defender) {
 
   int damage = attacker_stats.attr.str - defender_stats.attr.dex / 2;
 
-  if (entity_has(defender, health)) {
+  if (HAS_PART(Health, defender)) {
     // operate on full int to allow for negative numbers
-    int health = WORLD.health[defender];
+    int health = PART(Health, defender);
     health -= damage;
     if (health < 0) {
       health = 0;
     }
-    WORLD.health[defender] = health;
+    PART(Health, defender) = health;
 
     if (health == 0) {
-      entity_mark(defender, is_dead);
+      SET_MARK(IsDead, defender);
       if (entity_is_player(defender)) {
         output_message("You died!");
       }

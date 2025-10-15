@@ -52,8 +52,8 @@ void entityset_expand_descendants(EntitySet *set) {
   // Pre-populate visited with entities already in the set
   bitset_copy(visited, set->bitset);
 
-  // Scan all entities with parent component
-  world_query(i, BITS(parent)) {
+  // Scan all entities with parent part
+  world_query(i, BITS(Parent)) {
     // Skip if already visited
     if (bitset_test(visited, i))
       continue;
@@ -64,7 +64,7 @@ void entityset_expand_descendants(EntitySet *set) {
     path[path_len++] = i;
     bitset_set(visited, i);
 
-    EntityIndex current_idx = WORLD.parent[i];
+    EntityIndex current_idx = PART(Parent, i);
     bool found = false;
 
     for (int depth = 0; depth < MAX_DEPTH; depth++) {
@@ -83,9 +83,9 @@ void entityset_expand_descendants(EntitySet *set) {
       path[path_len++] = current_idx;
       bitset_set(visited, current_idx);
 
-      if (!entity_has(current_idx, parent))
+      if (!HAS_PART(Parent, current_idx))
         break;
-      current_idx = WORLD.parent[current_idx];
+      current_idx = PART(Parent, current_idx);
     }
 
     // Add the entire path to set if found
@@ -97,9 +97,6 @@ void entityset_expand_descendants(EntitySet *set) {
   }
 }
 
-#define DO_CLEAR_COMPONENT_BIT(type, name) CLEAR_COMPONENT_BIT(index, name);
-#define DO_CLEAR_MARKER_BIT(name) CLEAR_COMPONENT_BIT(index, name);
-
 void entityset_free(EntitySet *to_free) {
   entityset_expand_descendants(to_free);
 
@@ -108,30 +105,34 @@ void entityset_free(EntitySet *to_free) {
     EntityIndex index = to_free->entities[i];
 
     // Remove from turn queue if present
-    if (entity_has(index, turn_schedule)) {
+    if (HAS_PART(TurnSchedule, index)) {
       turn_queue_remove(index);
     }
 
-    FOREACH_COMPONENT(DO_CLEAR_COMPONENT_BIT)
-    FOREACH_MARKER(DO_CLEAR_MARKER_BIT)
+#define DO_CLEAR_PART_BIT(name, type) CLEAR_PART_BIT(name, index);
+#define DO_CLEAR_MARK_BIT(name) CLEAR_PART_BIT(name, index);
+    FOREACH_PART(DO_CLEAR_PART_BIT)
+    FOREACH_MARK(DO_CLEAR_MARK_BIT)
+#undef DO_CLEAR_PART_BIT
+#undef DO_CLEAR_MARK_BIT
 
     // Increment generation to invalidate the freed handle
     // Only return to freelist if generation hasn't maxed out
-    if (WORLD.generation[index] < UINT16_MAX) {
-      WORLD.generation[index]++;
-      assert(WORLD.freelist_count < MAX_ENTITIES);
-      WORLD.freelist[WORLD.freelist_count++] = index;
+    if (WORLD.entities.generation[index] < UINT16_MAX) {
+      WORLD.entities.generation[index]++;
+      assert(WORLD.entities.freelist_count < MAX_ENTITIES);
+      WORLD.entities.freelist[WORLD.entities.freelist_count++] = index;
     }
     // else: slot permanently retired at max generation
   }
 }
 
 EntityIndex entity_alloc(void) {
-  if (WORLD.freelist_count > 0) {
-    return WORLD.freelist[--WORLD.freelist_count];
+  if (WORLD.entities.freelist_count > 0) {
+    return WORLD.entities.freelist[--WORLD.entities.freelist_count];
   }
-  assert(WORLD.entity_count < MAX_ENTITIES);
-  return WORLD.entity_count++;
+  assert(WORLD.entities.count < MAX_ENTITIES);
+  return WORLD.entities.count++;
 }
 
 void entity_free(EntityIndex index) {
@@ -141,29 +142,29 @@ void entity_free(EntityIndex index) {
 }
 
 bool entity_is_player(EntityIndex index) {
-  return entity_handle_to_index(WORLD.player) == index;
+  return entity_handle_to_index(WORLD.entities.player) == index;
 }
 
 EntityIndex get_position_ancestor(EntityIndex entity) {
   for (;;) {
-    if (entity_has(entity, position)) {
+    if (HAS_PART(Position, entity)) {
       return entity;
     }
-    if (!entity_has(entity, parent)) {
+    if (!HAS_PART(Parent, entity)) {
       return 0;
     }
-    entity = WORLD.parent[entity];
+    entity = PART(Parent, entity);
   }
 }
 
 EntityIndex get_attributes_ancestor(EntityIndex entity) {
   for (;;) {
-    if (entity_has(entity, attributes)) {
+    if (HAS_PART(Attributes, entity)) {
       return entity;
     }
-    if (!entity_has(entity, parent)) {
+    if (!HAS_PART(Parent, entity)) {
       return 0;
     }
-    entity = WORLD.parent[entity];
+    entity = PART(Parent, entity);
   }
 }

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "components.h"
+#include "parts.h"
 #include <stdbool.h>
 #include <stdint.h>
 

@@ -11,10 +11,10 @@ typedef struct {
   EntityHandle entities[MAX_ENTITIES];
 } TurnQueue;
 
-// Insert entity into turn queue with given delay (adds turn_schedule component)
+// Insert entity into turn queue with given delay (adds turn_schedule part)
 void turn_queue_insert(EntityIndex entity, int16_t delay);
 
-// Remove entity from turn queue (removes turn_schedule component)
+// Remove entity from turn queue (removes turn_schedule part)
 void turn_queue_remove(EntityIndex entity);
 
 // Add to entity's turn_schedule[e].delay and reprioritize in queue

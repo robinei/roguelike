@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ai/ai.h"
 #include "identity.h"
 
 #define STR_DEFAULT 2
@@ -109,19 +110,33 @@ typedef struct {
   uint16_t queue_index;
 } TurnSchedule;
 
-#define FOREACH_COMPONENT(X)                                                   \
-  X(EntityIdentity, identity)                                                  \
-  X(EntityIndex, parent)                                                       \
-  X(TurnSchedule, turn_schedule)                                               \
-  X(Position, position)                                                        \
-  X(uint8_t, material)                                                         \
-  X(Attributes, attributes)                                                    \
-  X(AttributesModifier, attributes_modifier)                                   \
-  X(uint8_t, health)                                                           \
-  X(BodyPart, body_part)                                                       \
-  X(ParticleEmitter, particle_emitter)
+#define FOREACH_PART(PART)                                                     \
+  PART(Identity, EntityIdentity)                                               \
+  PART(Parent, EntityIndex)                                                    \
+  PART(TurnSchedule, TurnSchedule)                                             \
+  PART(Goals, GoalIndex)                                                       \
+  PART(Position, Position)                                                     \
+  PART(Material, uint8_t)                                                      \
+  PART(Attributes, Attributes)                                                 \
+  PART(AttributesModifier, AttributesModifier)                                 \
+  PART(Health, uint8_t)                                                        \
+  PART(BodyPart, BodyPart)                                                     \
+  PART(ParticleEmitter, ParticleEmitter)
 
-#define FOREACH_MARKER(X)                                                      \
-  X(is_equipped)                                                               \
-  X(is_inventory)                                                              \
-  X(is_dead)
+#define FOREACH_MARK(MARK)                                                     \
+  MARK(IsEquipped)                                                             \
+  MARK(IsInventory)                                                            \
+  MARK(IsDead)
+
+#define DO_DECLARE_PART(name, type)                                            \
+  uint64_t name##_bitset[BITSET_WORDS];                                        \
+  type name[MAX_ENTITIES];
+#define DO_DECLARE_MARK(name) uint64_t name##_bitset[BITSET_WORDS];
+
+typedef struct {
+  FOREACH_PART(DO_DECLARE_PART)
+  FOREACH_MARK(DO_DECLARE_MARK)
+} PartsState;
+
+#undef DO_DECLARE_PART
+#undef DO_DECLARE_MARK
