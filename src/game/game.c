@@ -266,6 +266,43 @@ static uint8_t calc_tile_light(Map *map, int tile_x, int tile_y, int player_x,
   return 63; // Beyond torch radius - full darkness
 }
 
+// Helper to get water depth at a tile position
+// Returns fallback for out-of-bounds or impassable tiles
+static inline uint8_t get_water_depth(Map *map, int tile_x, int tile_y, uint8_t fallback) {
+  if (tile_x < 0 || tile_x >= map->width || tile_y < 0 || tile_y >= map->height) {
+    return fallback;
+  }
+  if (!map->cells[tile_y * MAP_WIDTH_MAX + tile_x].passable) {
+    return fallback;
+  }
+  return map->water_depth[tile_y * MAP_WIDTH_MAX + tile_x];
+}
+
+// Helper to calculate water depth at a corner by averaging surrounding tiles
+static uint8_t calc_corner_water_depth(Map *map, int tile_x, int tile_y,
+                                        int corner_x, int corner_y,
+                                        uint8_t current_depth) {
+  // Sample the 4 tiles surrounding this corner
+  // corner_x and corner_y are 0 or 1, indicating which corner of the tile
+  int nx0 = tile_x + corner_x - 1;
+  int ny0 = tile_y + corner_y - 1;
+  int nx1 = tile_x + corner_x;
+  int ny1 = tile_y + corner_y - 1;
+  int nx2 = tile_x + corner_x - 1;
+  int ny2 = tile_y + corner_y;
+  int nx3 = tile_x + corner_x;
+  int ny3 = tile_y + corner_y;
+
+  // Use current_depth as fallback for solid tiles
+  int d0 = get_water_depth(map, nx0, ny0, current_depth);
+  int d1 = get_water_depth(map, nx1, ny1, current_depth);
+  int d2 = get_water_depth(map, nx2, ny2, current_depth);
+  int d3 = get_water_depth(map, nx3, ny3, current_depth);
+
+  // Average the 4 surrounding tiles
+  return (uint8_t)((d0 + d1 + d2 + d3) / 4);
+}
+
 // Helper to calculate light at a corner by taking minimum of surrounding tiles
 static uint8_t calc_corner_light(Map *map, int tile_x, int tile_y, int corner_x,
                                  int corner_y, int player_x, int player_y) {
@@ -357,7 +394,7 @@ void game_render(WorldState *world, RenderContext *ctx) {
                   0.04f * s2 * s2 + // Squared for non-linearity
                   0.03f * s1 * s3;  // Cross-product for chaos
 
-  // Draw visible tiles with interpolated torch lighting
+  // Draw visible tiles
   int screen_y = -offset_y;
   for (int tile_y = start_tile_y; screen_y < ctx->viewport_height_px;
        tile_y++) {
@@ -370,82 +407,6 @@ void game_render(WorldState *world, RenderContext *ctx) {
 
         int tile = world->map.cells[tile_y * MAP_WIDTH_MAX + tile_x].tile;
         geobuilder_tile(&geom, tile, screen_x, screen_y);
-
-        // Check if this tile is visible
-        bool tile_visible =
-            world->map.cells[tile_y * MAP_WIDTH_MAX + tile_x].visible;
-
-        if (tile_visible) {
-          // Check if this tile has any lighting (to decide if we need expensive
-          // corner sampling)
-          uint8_t tile_light = calc_tile_light(&world->map, tile_x, tile_y,
-                                               player_tile_x, player_tile_y);
-
-          if (tile_light > 63) {
-            // Tile has some lighting - do full corner interpolation
-            uint8_t tl_light =
-                calc_corner_light(&world->map, tile_x, tile_y, 0, 0,
-                                  player_tile_x, player_tile_y);
-            uint8_t tr_light =
-                calc_corner_light(&world->map, tile_x, tile_y, 1, 0,
-                                  player_tile_x, player_tile_y);
-            uint8_t bl_light =
-                calc_corner_light(&world->map, tile_x, tile_y, 0, 1,
-                                  player_tile_x, player_tile_y);
-            uint8_t br_light =
-                calc_corner_light(&world->map, tile_x, tile_y, 1, 1,
-                                  player_tile_x, player_tile_y);
-
-            // Apply flicker to light values (only in lit areas)
-            tl_light = tl_light > 63 ? (uint8_t)(63 + (tl_light - 63) * flicker)
-                                     : tl_light;
-            tr_light = tr_light > 63 ? (uint8_t)(63 + (tr_light - 63) * flicker)
-                                     : tr_light;
-            bl_light = bl_light > 63 ? (uint8_t)(63 + (bl_light - 63) * flicker)
-                                     : bl_light;
-            br_light = br_light > 63 ? (uint8_t)(63 + (br_light - 63) * flicker)
-                                     : br_light;
-
-            // Draw darkness overlay with per-vertex colors (255 - light)
-            Color tl = {0, 0, 0, (uint8_t)(255 - tl_light)};
-            Color tr = {0, 0, 0, (uint8_t)(255 - tr_light)};
-            Color bl = {0, 0, 0, (uint8_t)(255 - bl_light)};
-            Color br = {0, 0, 0, (uint8_t)(255 - br_light)};
-            geobuilder_rect_colored(&geom, screen_x, screen_y, ctx->tile_size,
-                                    ctx->tile_size, tl, tr, bl, br);
-
-            // Draw debug info if enabled
-            if (WORLD.debug_show_light_values) {
-              geobuilder_text(&geom, screen_x + 1, screen_y + 1, 0.33f,
-                              TEXT_ALIGN_LEFT, (Color){0, 0, 0, 0}, "%d",
-                              tile_light);
-            }
-          } else {
-            // Tile is visible but outside torch radius - uniform darkness
-            geobuilder_rect(&geom, screen_x, screen_y, ctx->tile_size,
-                            ctx->tile_size, (Color){0, 0, 0, 192});
-          }
-        } else {
-          // Non-visible tile - draw uniform full darkness
-          geobuilder_rect(&geom, screen_x, screen_y, ctx->tile_size,
-                          ctx->tile_size, (Color){0, 0, 0, 192});
-        }
-
-        // Draw water overlay on ALL tiles (after lighting/darkness)
-        float water_depth =
-            world->map.water_depth[tile_y * MAP_WIDTH_MAX + tile_x];
-        if (water_depth > 0) {
-          uint8_t water_alpha = (uint8_t)(water_depth * 255.0);
-          geobuilder_rect(&geom, screen_x, screen_y, ctx->tile_size,
-                          ctx->tile_size, (Color){0, 100, 200, water_alpha});
-
-          // Draw water debug value
-          if (WORLD.debug_show_light_values) {
-            geobuilder_text(&geom, screen_x + 1, screen_y + 1, 0.33f,
-                            TEXT_ALIGN_LEFT, (Color){0, 0, 0, 0}, "%d",
-                            water_alpha);
-          }
-        }
       }
       screen_x += ctx->tile_size;
     }
@@ -507,6 +468,129 @@ void game_render(WorldState *world, RenderContext *ctx) {
     // For now, all entities are rendered as TILE_PLAYER
     // TODO: Use glyph component or similar to determine tile
     geobuilder_tile(&geom, TILE_PLAYER, screen_x, screen_y);
+  }
+
+  // Draw interpolated torch lighting (actually draw the darkness), and water
+  // overlays
+  screen_y = -offset_y;
+  for (int tile_y = start_tile_y; screen_y < ctx->viewport_height_px;
+       tile_y++) {
+    int screen_x = -offset_x;
+    for (int tile_x = start_tile_x; screen_x < ctx->viewport_width_px;
+         tile_x++) {
+      // Check if tile is within map bounds
+      if (tile_x >= 0 && tile_x < (int)world->map.width && tile_y >= 0 &&
+          tile_y < (int)world->map.height) {
+
+        // Draw water overlay on ALL tiles (after lighting/darkness)
+        uint8_t water_depth =
+            world->map.water_depth[tile_y * MAP_WIDTH_MAX + tile_x];
+        if (water_depth > 0) {
+          // Check if neighbors have different depths (need interpolation)
+          uint8_t left = get_water_depth(&world->map, tile_x - 1, tile_y, water_depth);
+          uint8_t right = get_water_depth(&world->map, tile_x + 1, tile_y, water_depth);
+          uint8_t up = get_water_depth(&world->map, tile_x, tile_y - 1, water_depth);
+          uint8_t down = get_water_depth(&world->map, tile_x, tile_y + 1, water_depth);
+
+          bool needs_interpolation = (left != water_depth || right != water_depth ||
+                                      up != water_depth || down != water_depth);
+
+          if (needs_interpolation) {
+            // Expensive path: corner interpolation
+            uint8_t tl_depth = calc_corner_water_depth(&world->map, tile_x, tile_y, 0, 0, water_depth);
+            uint8_t tr_depth = calc_corner_water_depth(&world->map, tile_x, tile_y, 1, 0, water_depth);
+            uint8_t bl_depth = calc_corner_water_depth(&world->map, tile_x, tile_y, 0, 1, water_depth);
+            uint8_t br_depth = calc_corner_water_depth(&world->map, tile_x, tile_y, 1, 1, water_depth);
+
+            uint8_t tl_alpha = tl_depth / 2;
+            uint8_t tr_alpha = tr_depth / 2;
+            uint8_t bl_alpha = bl_depth / 2;
+            uint8_t br_alpha = br_depth / 2;
+
+            Color tl = {0, 100, 200, tl_alpha};
+            Color tr = {0, 100, 200, tr_alpha};
+            Color bl = {0, 100, 200, bl_alpha};
+            Color br = {0, 100, 200, br_alpha};
+            geobuilder_rect_colored(&geom, screen_x, screen_y, ctx->tile_size,
+                                    ctx->tile_size, tl, tr, bl, br);
+          } else {
+            // Cheap path: flat color
+            uint8_t water_alpha = water_depth / 2;
+            geobuilder_rect(&geom, screen_x, screen_y, ctx->tile_size,
+                            ctx->tile_size, (Color){0, 100, 200, water_alpha});
+          }
+
+          // Draw water debug value
+          if (WORLD.debug_show_light_values) {
+            geobuilder_text(&geom, screen_x + 1, screen_y + 1, 0.33f,
+                            TEXT_ALIGN_LEFT, (Color){0, 0, 0, 0}, "%d",
+                            water_depth);
+          }
+        }
+
+        // Check if this tile is visible
+        bool tile_visible =
+            world->map.cells[tile_y * MAP_WIDTH_MAX + tile_x].visible;
+
+        if (tile_visible) {
+          // Check if this tile has any lighting (to decide if we need expensive
+          // corner sampling)
+          uint8_t tile_light = calc_tile_light(&world->map, tile_x, tile_y,
+                                               player_tile_x, player_tile_y);
+
+          if (tile_light > 63) {
+            // Tile has some lighting - do full corner interpolation
+            uint8_t tl_light =
+                calc_corner_light(&world->map, tile_x, tile_y, 0, 0,
+                                  player_tile_x, player_tile_y);
+            uint8_t tr_light =
+                calc_corner_light(&world->map, tile_x, tile_y, 1, 0,
+                                  player_tile_x, player_tile_y);
+            uint8_t bl_light =
+                calc_corner_light(&world->map, tile_x, tile_y, 0, 1,
+                                  player_tile_x, player_tile_y);
+            uint8_t br_light =
+                calc_corner_light(&world->map, tile_x, tile_y, 1, 1,
+                                  player_tile_x, player_tile_y);
+
+            // Apply flicker to light values (only in lit areas)
+            tl_light = tl_light > 63 ? (uint8_t)(63 + (tl_light - 63) * flicker)
+                                     : tl_light;
+            tr_light = tr_light > 63 ? (uint8_t)(63 + (tr_light - 63) * flicker)
+                                     : tr_light;
+            bl_light = bl_light > 63 ? (uint8_t)(63 + (bl_light - 63) * flicker)
+                                     : bl_light;
+            br_light = br_light > 63 ? (uint8_t)(63 + (br_light - 63) * flicker)
+                                     : br_light;
+
+            // Draw darkness overlay with per-vertex colors (255 - light)
+            Color tl = {0, 0, 0, (uint8_t)(255 - tl_light)};
+            Color tr = {0, 0, 0, (uint8_t)(255 - tr_light)};
+            Color bl = {0, 0, 0, (uint8_t)(255 - bl_light)};
+            Color br = {0, 0, 0, (uint8_t)(255 - br_light)};
+            geobuilder_rect_colored(&geom, screen_x, screen_y, ctx->tile_size,
+                                    ctx->tile_size, tl, tr, bl, br);
+
+            // Draw debug info if enabled
+            if (WORLD.debug_show_light_values) {
+              geobuilder_text(&geom, screen_x + 1, screen_y + 1, 0.33f,
+                              TEXT_ALIGN_LEFT, (Color){0, 0, 0, 0}, "%d",
+                              tile_light);
+            }
+          } else {
+            // Tile is visible but outside torch radius - uniform darkness
+            geobuilder_rect(&geom, screen_x, screen_y, ctx->tile_size,
+                            ctx->tile_size, (Color){0, 0, 0, 192});
+          }
+        } else {
+          // Non-visible tile - draw uniform full darkness
+          geobuilder_rect(&geom, screen_x, screen_y, ctx->tile_size,
+                          ctx->tile_size, (Color){0, 0, 0, 192});
+        }
+      }
+      screen_x += ctx->tile_size;
+    }
+    screen_y += ctx->tile_size;
   }
 
 // Draw message log at bottom of screen
