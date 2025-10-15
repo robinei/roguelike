@@ -64,14 +64,24 @@ static inline float rsqrt(float number) {
   return y;
 }
 
-static inline int clamp_int(int i, int min, int max) {
-  if (i < min) {
+static inline int clamp_int(int x, int min, int max) {
+  if (x < min) {
     return min;
   }
-  if (i > max) {
+  if (x > max) {
     return max;
   }
-  return i;
+  return x;
+}
+
+static inline float clamp_float(float x, float min, float max) {
+  if (x < min) {
+    return min;
+  }
+  if (x > max) {
+    return max;
+  }
+  return x;
 }
 
 // ============================================================================

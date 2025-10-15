@@ -1,256 +1,195 @@
-#include "common.h"
 #include "flood.h"
+#include "common.h"
+#include "map.h"
 
 // Simulation parameters
-#define PRESSURE_CONSTANT 0.8f
-#define DAMPING 0.92f
-#define MAX_VELOCITY 80
+#define DAMPING 0.98f        // Velocity damping for stability
+#define DEPTH_TRANSFER 0.25f // How much depth difference drives flow
+#define VELOCITY_SCALE 0.5f  // Scale down velocities to prevent instability
+#define MAX_VELOCITY 20.0f   // Maximum velocity magnitude to prevent runaway
 
-// Helper to get water cell at position
-static inline WaterCell *get_water(Map *map, int x, int y) {
-  if (x < 0 || x >= map->width || y < 0 || y >= map->height) {
-    return NULL;
-  }
-  return &map->water[y * MAP_WIDTH_MAX + x];
+#define IX(x, y) ((y) * MAP_WIDTH_MAX + (x))
+
+// Temporary buffer for double-buffering
+static float temp_depth[MAP_WIDTH_MAX * MAP_HEIGHT_MAX];
+
+// Helper to check if a cell is solid (impassable)
+static inline bool is_solid(Map *map, int x, int y) {
+  return !map->cells[IX(x, y)].passable;
 }
 
-// Helper to get map cell at position
-static inline MapCell *get_cell(Map *map, int x, int y) {
+// Helper to get depth at position, treating outside map as max depth
+static inline float get_neighbour_depth(Map *map, int x, int y,
+                                        float self_depth) {
   if (x < 0 || x >= map->width || y < 0 || y >= map->height) {
-    return NULL;
+    return 1.0f; // Cells outside map are considered full of water
   }
-  return &map->cells[y * MAP_WIDTH_MAX + x];
+  if (is_solid(map, x, y)) {
+    return self_depth; // Block flows through solid walls
+  }
+  return map->water_depth[IX(x, y)];
 }
 
 void flood_simulate_step(Map *map) {
-  // Temp buffers for clean double-buffering
-  static int8_t temp_vel_x[MAP_WIDTH_MAX * MAP_HEIGHT_MAX];
-  static int8_t temp_vel_y[MAP_WIDTH_MAX * MAP_HEIGHT_MAX];
-  static uint8_t temp_depth[MAP_WIDTH_MAX * MAP_HEIGHT_MAX];
+  int width = map->width;
+  int height = map->height;
 
-  // PASS 1: Update velocities based on pressure gradients
-  // Input: map->water[].depth (read only)
-  // Output: temp_vel[] (write only)
-  for (int y = 0; y < map->height; y++) {
-    for (int x = 0; x < map->width; x++) {
-      int idx = y * MAP_WIDTH_MAX + x;
-      MapCell *cell = get_cell(map, x, y);
+  // Step 0: Apply boundary condition
+  for (int x = 0; x < width; x++) {
+    map->water_depth[IX(x, 0)] = is_solid(map, x, 0) ? 0.0f : 1.0f;
+    map->water_depth[IX(x, height - 1)] =
+        is_solid(map, x, height - 1) ? 0.0f : 1.0f;
+  }
+  for (int y = 0; y < height; y++) {
+    map->water_depth[IX(0, y)] = is_solid(map, 0, y) ? 0.0f : 1.0f;
+    map->water_depth[IX(width - 1, y)] =
+        is_solid(map, width - 1, y) ? 0.0f : 1.0f;
+  }
 
-      if (!cell->passable) {
-        temp_vel_x[idx] = 0;
-        temp_vel_y[idx] = 0;
+  // Step 1: Update velocities based on depth gradients
+  for (int y = 0; y < height; y++) {
+    for (int x = 0; x < width; x++) {
+      int idx = IX(x, y);
+
+      // Skip solid cells
+      if (is_solid(map, x, y)) {
+        map->water_velx[idx] = 0;
+        map->water_vely[idx] = 0;
         continue;
       }
 
-      WaterCell *water = get_water(map, x, y);
-      int my_depth = water->water_depth;
+      // Get current depth and velocity
+      float depth = map->water_depth[idx];
+      float vx = map->water_velx[idx];
+      float vy = map->water_vely[idx];
 
-      // Calculate pressure gradients in each direction
-      int depth_left = my_depth;
-      int depth_right = my_depth;
-      int depth_up = my_depth;
-      int depth_down = my_depth;
+      // Calculate depth gradients (pressure gradients)
+      // Check all 4 cardinal directions
+      float depth_left = get_neighbour_depth(map, x - 1, y, depth);
+      float depth_right = get_neighbour_depth(map, x + 1, y, depth);
+      float depth_up = get_neighbour_depth(map, x, y - 1, depth);
+      float depth_down = get_neighbour_depth(map, x, y + 1, depth);
 
-      // Left neighbor
-      WaterCell *w_left = get_water(map, x - 1, y);
-      MapCell *c_left = get_cell(map, x - 1, y);
-      if (!w_left) {
-        depth_left = 255; // Off-map
-      } else if (c_left->passable) {
-        depth_left = w_left->water_depth;
-      }
+      // Pressure gradient acceleration (water flows from high to low depth)
+      float grad_x = (depth_left - depth_right) * DEPTH_TRANSFER;
+      float grad_y = (depth_up - depth_down) * DEPTH_TRANSFER;
 
-      // Right neighbor
-      WaterCell *w_right = get_water(map, x + 1, y);
-      MapCell *c_right = get_cell(map, x + 1, y);
-      if (!w_right) {
-        depth_right = 255; // Off-map
-      } else if (c_right->passable) {
-        depth_right = w_right->water_depth;
-      }
-
-      // Up neighbor
-      WaterCell *w_up = get_water(map, x, y - 1);
-      MapCell *c_up = get_cell(map, x, y - 1);
-      if (!w_up) {
-        depth_up = 255; // Off-map
-      } else if (c_up->passable) {
-        depth_up = w_up->water_depth;
-      }
-
-      // Down neighbor
-      WaterCell *w_down = get_water(map, x, y + 1);
-      MapCell *c_down = get_cell(map, x, y + 1);
-      if (!w_down) {
-        depth_down = 255; // Off-map
-      } else if (c_down->passable) {
-        depth_down = w_down->water_depth;
-      }
-
-      // Pressure gradient creates acceleration
-      // Higher depth on left pushes right, higher on right pushes left
-      int pressure_x = depth_left - depth_right;
-      int pressure_y = depth_up - depth_down;
-
-      int accel_x = (int)(pressure_x * PRESSURE_CONSTANT);
-      int accel_y = (int)(pressure_y * PRESSURE_CONSTANT);
-
-      // Update velocity
-      int new_vx = water->velocity_x + accel_x;
-      int new_vy = water->velocity_y + accel_y;
-
-      // Apply damping
-      new_vx = (int)(new_vx * DAMPING);
-      new_vy = (int)(new_vy * DAMPING);
-
-      // Clamp velocity
-      temp_vel_x[idx] = clamp_int(new_vx, -MAX_VELOCITY, MAX_VELOCITY);
-      temp_vel_y[idx] = clamp_int(new_vy, -MAX_VELOCITY, MAX_VELOCITY);
+      // Update velocity with damping and clamping
+      vx = (vx + grad_x) * DAMPING;
+      vy = (vy + grad_y) * DAMPING;
+      map->water_velx[idx] = clamp_float(vx, -MAX_VELOCITY, MAX_VELOCITY);
+      map->water_vely[idx] = clamp_float(vy, -MAX_VELOCITY, MAX_VELOCITY);
     }
   }
 
-  // PASS 2: Transport water based on velocity
-  // Input: map->water[].depth (read only), temp_vel[] (read only)
-  // Output: temp_depth[] (write only)
+  // Step 2: Advect depth based on velocities
+  // Use temp buffer to avoid read/write conflicts
+  memset(temp_depth, 0, sizeof(temp_depth));
 
-  // Initialize temp_depth from current state
-  for (int i = 0; i < MAP_WIDTH_MAX * MAP_HEIGHT_MAX; i++) {
-    temp_depth[i] = map->water[i].water_depth;
-  }
+  for (int y = 0; y < height; y++) {
+    for (int x = 0; x < width; x++) {
+      int idx = IX(x, y);
 
-  // Process each edge exactly once (right and down only)
-  for (int y = 0; y < map->height; y++) {
-    for (int x = 0; x < map->width; x++) {
-      int idx = y * MAP_WIDTH_MAX + x;
-      MapCell *cell = get_cell(map, x, y);
-
-      if (!cell->passable) {
+      // Skip solid cells
+      if (is_solid(map, x, y)) {
         continue;
       }
 
-      // Process RIGHT edge (between x and x+1)
-      WaterCell *w_right = get_water(map, x + 1, y);
-      MapCell *c_right = get_cell(map, x + 1, y);
+      float depth = map->water_depth[idx];
+      if (depth <= 0) {
+        continue;
+      }
 
-      if (w_right && c_right->passable) {
-        // Both cells exist and are passable - calculate flow
-        int idx_right = y * MAP_WIDTH_MAX + (x + 1);
+      float vx = map->water_velx[idx] * VELOCITY_SCALE;
+      float vy = map->water_vely[idx] * VELOCITY_SCALE;
 
-        // Average velocity at the edge
-        int v_avg = (temp_vel_x[idx] + temp_vel_x[idx_right]) / 2;
+      // Calculate how much water flows in each direction
+      // Positive velocity means flow to the right/down
+      float flow_right = vx > 0 ? vx : 0;
+      float flow_left = vx < 0 ? -vx : 0;
+      float flow_down = vy > 0 ? vy : 0;
+      float flow_up = vy < 0 ? -vy : 0;
 
-        if (v_avg > 0) {
-          // Flow from left to right
-          int depth_source = map->water[idx].water_depth;
-          if (depth_source > 0) {
-            int transfer = (v_avg * depth_source) / 127;
-            transfer = clamp_int(transfer, 0, depth_source / 2);
-            temp_depth[idx] -= transfer;
-            temp_depth[idx_right] += transfer;
+      float total_flow = flow_right + flow_left + flow_down + flow_up;
+      if (total_flow <= 0) {
+        temp_depth[idx] += depth; // Nothing flows
+        continue;
+      }
+
+      // Calculate what fraction stays vs flows
+      float max_flow = depth * 0.8f; // Don't let all water leave
+      if (total_flow > max_flow) {
+        float scale = max_flow / total_flow;
+        flow_right *= scale;
+        flow_left *= scale;
+        flow_down *= scale;
+        flow_up *= scale;
+        total_flow = max_flow;
+      }
+
+      // Check capacity for each neighbor and calculate what can actually flow
+      float flows[4] = {flow_right, flow_left, flow_down, flow_up};
+      bool can_flow[4];
+      float available[4];
+      int neighbor_idx[4] = {IX(x + 1, y), IX(x - 1, y), IX(x, y + 1),
+                             IX(x, y - 1)};
+
+      // Check right
+      can_flow[0] = (x + 1 < width && !is_solid(map, x + 1, y));
+      available[0] = can_flow[0] ? (1.0f - temp_depth[neighbor_idx[0]]) : 0.0f;
+
+      // Check left
+      can_flow[1] = (x - 1 >= 0 && !is_solid(map, x - 1, y));
+      available[1] = can_flow[1] ? (1.0f - temp_depth[neighbor_idx[1]]) : 0.0f;
+
+      // Check down
+      can_flow[2] = (y + 1 < height && !is_solid(map, x, y + 1));
+      available[2] = can_flow[2] ? (1.0f - temp_depth[neighbor_idx[2]]) : 0.0f;
+
+      // Check up
+      can_flow[3] = (y - 1 >= 0 && !is_solid(map, x, y - 1));
+      available[3] = can_flow[3] ? (1.0f - temp_depth[neighbor_idx[3]]) : 0.0f;
+
+      // Redistribute blocked flows
+      for (int i = 0; i < 4; i++) {
+        if (!can_flow[i] || flows[i] >= available[i]) {
+          // This flow is blocked or would overflow
+          float blocked = can_flow[i] ? (flows[i] - available[i]) : flows[i];
+          flows[i] = can_flow[i] ? available[i] : 0.0f;
+
+          // Redistribute blocked amount among other directions + self
+          // Count how many valid redistribution targets (other dirs + self =
+          // always at least 1)
+          int targets = 1; // Always include self
+          for (int j = 0; j < 4; j++) {
+            if (j != i && can_flow[j])
+              targets++;
           }
-        } else if (v_avg < 0) {
-          // Flow from right to left
-          int depth_source = map->water[idx_right].water_depth;
-          if (depth_source > 0) {
-            int transfer = (-v_avg * depth_source) / 127;
-            transfer = clamp_int(transfer, 0, depth_source / 2);
-            temp_depth[idx_right] -= transfer;
-            temp_depth[idx] += transfer;
+
+          float share = blocked / targets;
+
+          // Add share to self (staying water)
+          temp_depth[idx] += share;
+
+          // Add share to other directions
+          for (int j = 0; j < 4; j++) {
+            if (j != i && can_flow[j]) {
+              flows[j] += share;
+            }
           }
-        }
-      } else if (!w_right) {
-        // Right edge of map - check for inflow from off-map
-        // Velocity pointing left (negative) means pressure from off-map pushing
-        // in
-        if (temp_vel_x[idx] < 0) {
-          int inflow = (-temp_vel_x[idx] * 2);
-          inflow = clamp_int(inflow, 0, 50);
-          temp_depth[idx] = clamp_int(temp_depth[idx] + inflow, 0, 255);
         }
       }
 
-      // Process DOWN edge (between y and y+1)
-      WaterCell *w_down = get_water(map, x, y + 1);
-      MapCell *c_down = get_cell(map, x, y + 1);
-
-      if (w_down && c_down->passable) {
-        // Both cells exist and are passable - calculate flow
-        int idx_down = (y + 1) * MAP_WIDTH_MAX + x;
-
-        // Average velocity at the edge
-        int v_avg = (temp_vel_y[idx] + temp_vel_y[idx_down]) / 2;
-
-        if (v_avg > 0) {
-          // Flow from up to down
-          int depth_source = map->water[idx].water_depth;
-          if (depth_source > 0) {
-            int transfer = (v_avg * depth_source) / 127;
-            transfer = clamp_int(transfer, 0, depth_source / 2);
-            temp_depth[idx] -= transfer;
-            temp_depth[idx_down] += transfer;
-          }
-        } else if (v_avg < 0) {
-          // Flow from down to up
-          int depth_source = map->water[idx_down].water_depth;
-          if (depth_source > 0) {
-            int transfer = (-v_avg * depth_source) / 127;
-            transfer = clamp_int(transfer, 0, depth_source / 2);
-            temp_depth[idx_down] -= transfer;
-            temp_depth[idx] += transfer;
-          }
-        }
-      } else if (!w_down) {
-        // Bottom edge of map - check for inflow from off-map
-        // Velocity pointing up (negative) means pressure from off-map pushing
-        // in
-        if (temp_vel_y[idx] < 0) {
-          int inflow = (-temp_vel_y[idx] * 2);
-          inflow = clamp_int(inflow, 0, 50);
-          temp_depth[idx] = clamp_int(temp_depth[idx] + inflow, 0, 255);
+      // Apply final flows
+      temp_depth[idx] += depth - total_flow; // Base staying water
+      for (int i = 0; i < 4; i++) {
+        if (can_flow[i] && flows[i] > 0) {
+          temp_depth[neighbor_idx[i]] += flows[i];
         }
       }
     }
   }
 
-  // Handle left and top edges (which weren't covered by the right/down pass)
-  for (int y = 0; y < map->height; y++) {
-    for (int x = 0; x < map->width; x++) {
-      int idx = y * MAP_WIDTH_MAX + x;
-      MapCell *cell = get_cell(map, x, y);
-
-      if (!cell->passable) {
-        continue;
-      }
-
-      // Left edge (x == 0)
-      if (x == 0) {
-        WaterCell *w_left = get_water(map, x - 1, y);
-        if (!w_left && temp_vel_x[idx] > 0) {
-          // Off-map to the left, velocity pointing right (pressure from
-          // off-map)
-          int inflow = (temp_vel_x[idx] * 2);
-          inflow = clamp_int(inflow, 0, 50);
-          temp_depth[idx] = clamp_int(temp_depth[idx] + inflow, 0, 255);
-        }
-      }
-
-      // Top edge (y == 0)
-      if (y == 0) {
-        WaterCell *w_up = get_water(map, x, y - 1);
-        if (!w_up && temp_vel_y[idx] > 0) {
-          // Off-map above, velocity pointing down (pressure from off-map)
-          int inflow = (temp_vel_y[idx] * 2);
-          inflow = clamp_int(inflow, 0, 50);
-          temp_depth[idx] = clamp_int(temp_depth[idx] + inflow, 0, 255);
-        }
-      }
-    }
-  }
-
-  // Copy temp buffers back to map
-  for (int i = 0; i < MAP_WIDTH_MAX * MAP_HEIGHT_MAX; i++) {
-    map->water[i].water_depth = temp_depth[i];
-    map->water[i].velocity_x = temp_vel_x[i];
-    map->water[i].velocity_y = temp_vel_y[i];
-  }
+  // Copy depth back
+  memcpy(map->water_depth, temp_depth, sizeof(temp_depth));
 }

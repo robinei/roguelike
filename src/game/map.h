@@ -14,16 +14,14 @@ typedef struct {
 } MapCell;
 
 typedef struct {
-  uint8_t water_depth;    // 0-255 water height
-  int8_t velocity_x;      // -127 to 127 horizontal flow
-  int8_t velocity_y;      // -127 to 127 vertical flow
-} WaterCell;
-
-typedef struct {
   int width;
   int height;
   MapCell cells[MAP_WIDTH_MAX * MAP_HEIGHT_MAX];
-  WaterCell water[MAP_WIDTH_MAX * MAP_HEIGHT_MAX];
+
+  // for water fluid sim
+  float water_depth[MAP_WIDTH_MAX * MAP_HEIGHT_MAX];
+  float water_velx[MAP_WIDTH_MAX * MAP_HEIGHT_MAX];
+  float water_vely[MAP_WIDTH_MAX * MAP_HEIGHT_MAX];
 } Map;
 
 // Get a random passable position on the map

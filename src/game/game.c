@@ -12,6 +12,7 @@
 #include "render_api.h"
 #include "turn_queue.h"
 #include "world.h"
+#include <stdint.h>
 
 static void particle_emit_system_tick() {
   world_query(i, BITS(particle_emitter)) {
@@ -97,42 +98,15 @@ void game_init(WorldState *world, uint64_t rng_seed) {
 
   // Compute initial FOV for player
   on_player_moved();
-
-  // Clear all water first
-  memset(WORLD.map.water, 0, sizeof(WORLD.map.water));
-
-  // Initialize water at map edges (passable edge tiles start with water)
-  int edge_passable_count = 0;
-  for (int y = 0; y < WORLD.map.height; y++) {
-    for (int x = 0; x < WORLD.map.width; x++) {
-      bool is_edge = (x == 0 || x == WORLD.map.width - 1 || y == 0 ||
-                      y == WORLD.map.height - 1);
-      if (is_edge) {
-        MapCell *cell = &WORLD.map.cells[y * MAP_WIDTH_MAX + x];
-        if (cell->passable) {
-          WORLD.map.water[y * MAP_WIDTH_MAX + x].water_depth = 255;
-          edge_passable_count++;
-        }
-      }
-    }
-  }
-  output_message("Found %d passable edge tiles", edge_passable_count);
 }
 
 static void game_tick(WorldState *world, uint64_t tick) {
   active_world = world;
+  (void)tick;
   particle_emit_system_tick();
 
   // Run flood simulation
   flood_simulate_step(&world->map);
-
-  // Debug: output every 10 ticks
-  if (tick % 10 == 0) {
-    // Sample a water tile to see if it's changing
-    int sample_idx = 1 * MAP_WIDTH_MAX + 30;
-    output_message("Tick %d: water[1,30]=%d", (int)tick,
-                   world->map.water[sample_idx].water_depth);
-  }
 }
 
 static void process_turn_entity(void) {
@@ -458,19 +432,18 @@ void game_render(WorldState *world, RenderContext *ctx) {
         }
 
         // Draw water overlay on ALL tiles (after lighting/darkness)
-        uint8_t water_depth =
-            world->map.water[tile_y * MAP_WIDTH_MAX + tile_x].water_depth;
+        float water_depth =
+            world->map.water_depth[tile_y * MAP_WIDTH_MAX + tile_x];
         if (water_depth > 0) {
-          uint8_t water_alpha = water_depth;
+          uint8_t water_alpha = (uint8_t)(water_depth * 255.0);
           geobuilder_rect(&geom, screen_x, screen_y, ctx->tile_size,
-                          ctx->tile_size,
-                          (Color){0, 100, 200, water_alpha});
+                          ctx->tile_size, (Color){0, 100, 200, water_alpha});
 
           // Draw water debug value
           if (WORLD.debug_show_light_values) {
             geobuilder_text(&geom, screen_x + 1, screen_y + 1, 0.33f,
-                            TEXT_ALIGN_LEFT, (Color){0, 0, 0, 0}, "W%d",
-                            water_depth);
+                            TEXT_ALIGN_LEFT, (Color){0, 0, 0, 0}, "%d",
+                            water_alpha);
           }
         }
       }
