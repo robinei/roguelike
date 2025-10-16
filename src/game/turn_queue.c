@@ -64,7 +64,7 @@ void turn_queue_insert(EntityIndex entity, int16_t delay) {
 
   // Add part
   uint16_t heap_pos = WORLD.turn_queue.count;
-  SET_PART(TurnSchedule, entity,
+  ADD_PART(TurnSchedule, entity,
            ((TurnSchedule){.delay = delay, .queue_index = heap_pos}));
 
   // Add to end of heap and sift up
@@ -80,7 +80,7 @@ void turn_queue_remove(EntityIndex entity) {
   assert(heap_index < WORLD.turn_queue.count);
 
   // Remove part
-  CLEAR_PART(TurnSchedule, entity);
+  REMOVE_PART(TurnSchedule, entity);
 
   // Replace with last element
   WORLD.turn_queue.count--;

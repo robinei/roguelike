@@ -1,6 +1,5 @@
 #include "common.h"
 #include "random.h"
-#include "world.h"
 #include <stdint.h>
 
 #define PI 3.14159265f
@@ -53,9 +52,9 @@ int particles_gen_spawn_interval(ParticleType type) {
   return 10; // Default: once per second
 }
 
-void particles_spawn_directed(ParticleType type, float x, float y, float dx,
-                              float dy) {
-  if (WORLD.particle_count >= MAX_PARTICLES) {
+void particles_spawn_directed(ParticlesState *ps, ParticleType type, float x,
+                              float y, float dx, float dy) {
+  if (ps->count >= MAX_PARTICLES) {
     return;
   }
 
@@ -110,35 +109,35 @@ void particles_spawn_directed(ParticleType type, float x, float y, float dx,
     break;
   }
 
-  WORLD.particles[WORLD.particle_count++] = (Particle){.type = type,
-                                                       .x = x,
-                                                       .y = y,
-                                                       .vx = vx,
-                                                       .vy = vy,
-                                                       .ttl = ttl,
-                                                       .lifetime = ttl};
+  ps->buffer[ps->count++] = (Particle){.type = type,
+                                       .x = x,
+                                       .y = y,
+                                       .vx = vx,
+                                       .vy = vy,
+                                       .ttl = ttl,
+                                       .lifetime = ttl};
 }
 
-void particles_spawn(ParticleType type, float x, float y) {
-  particles_spawn_directed(type, x, y, 1.0f, 0.0f);
+void particles_spawn(ParticlesState *ps, ParticleType type, float x, float y) {
+  particles_spawn_directed(ps, type, x, y, 1.0f, 0.0f);
 }
 
-static void particles_unspawn(uint32_t i) {
-  if (i == WORLD.particle_count - 1) {
-    --WORLD.particle_count;
+static void particles_unspawn(ParticlesState *ps, uint32_t i) {
+  if (i == ps->count - 1) {
+    --ps->count;
   } else {
-    WORLD.particles[i] = WORLD.particles[--WORLD.particle_count];
+    ps->buffer[i] = ps->buffer[--ps->count];
   }
 }
 
-void particles_update(float dt) {
-  WORLD.particle_time += dt;
+void particles_update(ParticlesState *ps, float dt) {
+  ps->time += dt;
 
-  for (uint32_t i = 0; i < WORLD.particle_count; ++i) {
-    Particle *p = WORLD.particles + i;
+  for (uint32_t i = 0; i < ps->count; ++i) {
+    Particle *p = ps->buffer + i;
     p->ttl -= dt;
     if (p->ttl <= 0) {
-      particles_unspawn(i);
+      particles_unspawn(ps, i);
       --i; // Recheck this index (now holds swapped particle)
       continue;
     }
@@ -157,15 +156,15 @@ void particles_update(float dt) {
       break;
     case PARTICLE_TYPE_FOG:
       // Fog drifts with sinusoidal wobble
-      p->vx = 0.3f * sinf(WORLD.particle_time * 1.5f + (float)i * 0.3f);
+      p->vx = 0.3f * sinf(ps->time * 1.5f + (float)i * 0.3f);
       break;
     case PARTICLE_TYPE_SNOW:
       // Snow wobbles side to side while falling (sine wave)
-      p->vx = 0.5f * sinf(WORLD.particle_time * 2.0f + (float)i * 0.5f);
+      p->vx = 0.5f * sinf(ps->time * 2.0f + (float)i * 0.5f);
       break;
     case PARTICLE_TYPE_TORCH_SMOKE:
       // Smoke wobbles as it rises
-      p->vx = 0.4f * sinf(WORLD.particle_time * 2.5f + (float)i * 0.2f);
+      p->vx = 0.4f * sinf(ps->time * 2.5f + (float)i * 0.2f);
       p->vy *= 0.98f; // slight deceleration
       break;
     case PARTICLE_TYPE_RAIN:

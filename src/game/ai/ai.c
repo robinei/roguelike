@@ -25,13 +25,13 @@ void aistate_free_goal(AIState *ai, GoalIndex goal) {
   ai->goals[goal] = (Goal){};
 }
 
-GoalIndex entity_add_goal(EntityIndex entity, GoalType type,
-                          GoalIndex original_intent) {
+GoalIndex entity_push_goal(EntityIndex entity, GoalType type,
+                           GoalIndex original_intent) {
   GoalIndex prev = 0;
   if (HAS_PART(Goals, entity)) {
     prev = PART(Goals, entity);
   } else {
-    SET_PART(Goals, entity, 0);
+    ADD_PART(Goals, entity, 0);
   }
   GoalIndex goal = aistate_alloc_goal(&WORLD.ai, type, original_intent, prev);
   PART(Goals, entity) = goal;
@@ -42,13 +42,19 @@ Goal *entity_peek_goal(EntityIndex entity) {
   if (!HAS_PART(Goals, entity)) {
     return NULL;
   }
-  return &WORLD.ai.goals[PART(Goals, entity)];
+  GoalIndex goal = PART(Goals, entity);
+  if (goal == 0) {
+    return NULL;
+  }
+  return &WORLD.ai.goals[goal];
+}
+
+bool entity_has_goal(EntityIndex entity) {
+  return entity_peek_goal(entity) != NULL;
 }
 
 void entity_pop_goal(EntityIndex entity) {
-  if (!HAS_PART(Goals, entity)) {
-    return;
-  }
+  assert(entity_has_goal(entity));
   GoalIndex goal = PART(Goals, entity);
   PART(Goals, entity) = WORLD.ai.goals[goal].next;
   aistate_free_goal(&WORLD.ai, goal);
@@ -58,7 +64,8 @@ void entity_update_ai(EntityIndex entity) {
   for (;;) {
     Goal *goal = entity_peek_goal(entity);
     if (!goal) {
-      break;
+      entity_push_goal(entity, GOAL_IDLE, 0);
+      continue;
     }
 
     if (goal->is_finished) {

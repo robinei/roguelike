@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stdint.h>
+
 #define MAX_PARTICLES 1024
 
 typedef enum {
@@ -19,14 +21,20 @@ typedef struct {
   float lifetime; // initial lifetime (for age-based effects in rendering)
 } Particle;
 
+typedef struct {
+  float time;
+  uint32_t count;
+  Particle buffer[MAX_PARTICLES];
+} ParticlesState;
+
 // Spawn particle with type-specific default behavior
-void particles_spawn(ParticleType type, float x, float y);
+void particles_spawn(ParticlesState *ps, ParticleType type, float x, float y);
 
 // Spawn particle with directional hint (magnitude ignored, only direction
 // matters)
-void particles_spawn_directed(ParticleType type, float x, float y, float dx,
-                              float dy);
+void particles_spawn_directed(ParticlesState *ps, ParticleType type, float x,
+                              float y, float dx, float dy);
 
-void particles_update(float dt);
+void particles_update(ParticlesState *ps, float dt);
 
 int particles_gen_spawn_interval(ParticleType type);

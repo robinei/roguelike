@@ -17,16 +17,16 @@ void output_message(const char *fmt, ...) {
   va_start(args, fmt);
 
   // If buffer is full, drop oldest message
-  if (WORLD.messages_count == MESSAGE_COUNT_MAX) {
-    WORLD.messages_first = (WORLD.messages_first + 1) % MESSAGE_COUNT_MAX;
+  if (WORLD.messages.count == MESSAGE_COUNT_MAX) {
+    WORLD.messages.first = (WORLD.messages.first + 1) % MESSAGE_COUNT_MAX;
   } else {
-    WORLD.messages_count++;
+    WORLD.messages.count++;
   }
 
   // Format message at next position
   uint32_t pos =
-      (WORLD.messages_first + WORLD.messages_count - 1) % MESSAGE_COUNT_MAX;
-  Message *msg = &WORLD.messages[pos];
+      (WORLD.messages.first + WORLD.messages.count - 1) % MESSAGE_COUNT_MAX;
+  Message *msg = &WORLD.messages.buffer[pos];
   msg->length = vsnprnf(msg->text, MESSAGE_LENGTH_MAX + 1, fmt, args);
   if (msg->length > MESSAGE_LENGTH_MAX) {
     msg->length = MESSAGE_LENGTH_MAX;
@@ -53,7 +53,7 @@ void entityset_expand_descendants(EntitySet *set) {
   bitset_copy(visited, set->bitset);
 
   // Scan all entities with parent part
-  world_query(i, BITS(Parent)) {
+  WORLD_QUERY(i, BITS(Parent)) {
     // Skip if already visited
     if (bitset_test(visited, i))
       continue;
@@ -109,8 +109,8 @@ void entityset_free(EntitySet *to_free) {
       turn_queue_remove(index);
     }
 
-#define DO_CLEAR_PART_BIT(name, type) CLEAR_PART_BIT(name, index);
-#define DO_CLEAR_MARK_BIT(name) CLEAR_PART_BIT(name, index);
+#define DO_CLEAR_PART_BIT(name, type) DISABLE_PART(name, index);
+#define DO_CLEAR_MARK_BIT(name) DISABLE_PART(name, index);
     FOREACH_PART(DO_CLEAR_PART_BIT)
     FOREACH_MARK(DO_CLEAR_MARK_BIT)
 #undef DO_CLEAR_PART_BIT
@@ -118,21 +118,21 @@ void entityset_free(EntitySet *to_free) {
 
     // Increment generation to invalidate the freed handle
     // Only return to freelist if generation hasn't maxed out
-    if (WORLD.entities.generation[index] < UINT16_MAX) {
-      WORLD.entities.generation[index]++;
-      assert(WORLD.entities.freelist_count < MAX_ENTITIES);
-      WORLD.entities.freelist[WORLD.entities.freelist_count++] = index;
+    if (ENTITIES.generation[index] < UINT16_MAX) {
+      ENTITIES.generation[index]++;
+      assert(ENTITIES.freelist_count < MAX_ENTITIES);
+      ENTITIES.freelist[ENTITIES.freelist_count++] = index;
     }
     // else: slot permanently retired at max generation
   }
 }
 
 EntityIndex entity_alloc(void) {
-  if (WORLD.entities.freelist_count > 0) {
-    return WORLD.entities.freelist[--WORLD.entities.freelist_count];
+  if (ENTITIES.freelist_count > 0) {
+    return ENTITIES.freelist[--ENTITIES.freelist_count];
   }
-  assert(WORLD.entities.count < MAX_ENTITIES);
-  return WORLD.entities.count++;
+  assert(ENTITIES.count < MAX_ENTITIES);
+  return ENTITIES.count++;
 }
 
 void entity_free(EntityIndex index) {
@@ -142,7 +142,7 @@ void entity_free(EntityIndex index) {
 }
 
 bool entity_is_player(EntityIndex index) {
-  return entity_handle_to_index(WORLD.entities.player) == index;
+  return entity_handle_to_index(ENTITIES.player) == index;
 }
 
 EntityIndex get_position_ancestor(EntityIndex entity) {

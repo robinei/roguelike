@@ -11,7 +11,7 @@ static Attributes gather_attributes(EntityIndex entity,
   if (HAS_PART(Attributes, entity)) {
     attr = PART(Attributes, entity);
 
-    entityset_query(i, entity_tree, HAS(AttributesModifier)) {
+    ENTITYSET_QUERY(i, entity_tree, HAS(AttributesModifier)) {
       if (get_attributes_ancestor(i) == entity) {
         attr.str =
             clamp_int(attr.str + PART(AttributesModifier, i).str, 0, STR_MAX);
@@ -55,7 +55,7 @@ void action_combat(EntityIndex attacker, EntityIndex defender) {
                    .actor = entity_handle_from_index(attacker),
                    .attack = {.target = entity_handle_from_index(defender)}};
 
-  if (attacker == entity_handle_to_index(WORLD.entities.player)) {
+  if (attacker == entity_handle_to_index(ENTITIES.player)) {
     output_message("You attacked!");
   }
 
@@ -74,7 +74,7 @@ void action_combat(EntityIndex attacker, EntityIndex defender) {
     PART(Health, defender) = health;
 
     if (health == 0) {
-      SET_MARK(IsDead, defender);
+      ENABLE_PART(IsDead, defender);
       if (entity_is_player(defender)) {
         output_message("You died!");
       }

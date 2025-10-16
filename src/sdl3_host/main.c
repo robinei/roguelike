@@ -325,7 +325,7 @@ int main(int argc, char *argv[]) {
         // Scroll message log
         if (event.key.key == SDLK_PAGEUP) {
           renderer.message_scroll_offset++;
-          int max_scroll = (int)world.messages_count - MESSAGE_DISPLAY_LINES;
+          int max_scroll = (int)world.messages.count - MESSAGE_DISPLAY_LINES;
           if (max_scroll < 0)
             max_scroll = 0;
           if (renderer.message_scroll_offset > max_scroll) {

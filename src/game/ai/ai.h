@@ -20,7 +20,7 @@ typedef struct {
   GoalType type;
   GoalIndex original_intent;
   GoalIndex next; // for chaining off entities as a stack
-  uint16_t is_finished;
+  bool is_finished;
 } Goal;
 
 typedef struct {
@@ -32,9 +32,12 @@ typedef struct {
 
 GoalIndex aistate_alloc_goal(AIState *ai, GoalType type,
                              GoalIndex original_intent, GoalIndex next);
+
 void aistate_free_goal(AIState *ai, GoalIndex goal);
 
-GoalIndex entity_add_goal(EntityIndex entity, GoalType type,
-                          GoalIndex original_intent);
+GoalIndex entity_push_goal(EntityIndex entity, GoalType type,
+                           GoalIndex original_intent);
+
 Goal *entity_peek_goal(EntityIndex entity);
+
 void entity_pop_goal(EntityIndex entity);

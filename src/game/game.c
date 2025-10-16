@@ -1,5 +1,6 @@
 #include "game.h"
 #include "actions/actions.h"
+#include "ai/ai.h"
 #include "common.h"
 #include "flood.h"
 #include "fov.h"
@@ -15,7 +16,7 @@
 #include <stdint.h>
 
 static void particle_emit_system_tick() {
-  world_query(i, BITS(ParticleEmitter)) {
+  WORLD_QUERY(i, BITS(ParticleEmitter)) {
     EntityIndex pos_index = get_position_ancestor(i);
     if (!pos_index) {
       // can't spawn without position
@@ -28,7 +29,7 @@ static void particle_emit_system_tick() {
     if (pe->countdown_ticks > 0 && --pe->countdown_ticks == 0) {
       float x = (float)pos->x + 0.5f;
       float y = (float)pos->y + 0.5f;
-      particles_spawn(pe->particle_type, x, y);
+      particles_spawn(&WORLD.particles, pe->particle_type, x, y);
       pe->countdown_ticks = particles_gen_spawn_interval(pe->particle_type);
     }
   }
@@ -43,8 +44,8 @@ static EntityIndex spawn_player(void) {
   }
 
   EntityIndex player = entity_alloc();
-  SET_PART(Position, player, pos);
-  SET_PART(Health, player, HEALTH_FULL);
+  ADD_PART(Position, player, pos);
+  ADD_PART(Health, player, HEALTH_FULL);
   turn_queue_insert(player, 0);
   return player;
 }
@@ -57,8 +58,8 @@ static EntityIndex spawn_monster(void) {
   }
 
   EntityIndex monster = entity_alloc();
-  SET_PART(Position, monster, pos);
-  SET_PART(Health, monster, HEALTH_FULL);
+  ADD_PART(Position, monster, pos);
+  ADD_PART(Health, monster, HEALTH_FULL);
   turn_queue_insert(monster, 0);
   return monster;
 }
@@ -67,11 +68,14 @@ void game_init(WorldState *world, uint64_t rng_seed) {
   active_world = world;
   world->rng_state = rng_seed;
 
-  // entity at index 0 should not be used (index 0 should mean "no entity")
+  // entity at index 0 should not be used (index 0 means "no entity")
   entity_alloc();
 
+  // goal at index 0 should not be used (index 0 means "no goal")
+  aistate_alloc_goal(&WORLD.ai, GOAL_NONE, 0, 0);
+
   EntityIndex turn_index = entity_alloc();
-  WORLD.entities.turn = entity_handle_from_index(turn_index);
+  ENTITIES.turn = entity_handle_from_index(turn_index);
   turn_queue_insert(turn_index, TURN_INTERVAL);
 
   // Generate map before spawning entities
@@ -90,7 +94,7 @@ void game_init(WorldState *world, uint64_t rng_seed) {
   mapgen_bsp(&WORLD.map, &bsp_params);
 
   // Spawn player and monsters in random passable positions
-  WORLD.entities.player = entity_handle_from_index(spawn_player());
+  ENTITIES.player = entity_handle_from_index(spawn_player());
 
   spawn_monster();
   spawn_monster();
@@ -110,14 +114,14 @@ static void game_tick(WorldState *world, uint64_t tick) {
 }
 
 static void process_turn_entity(void) {
-  EntityIndex entity = entity_handle_to_index(WORLD.entities.turn);
+  EntityIndex entity = entity_handle_to_index(ENTITIES.turn);
   turn_queue_add_delay(entity, TURN_INTERVAL);
 
   // reduce delay for all entities by TURN_INTERVAL once each turn, to avoid
   // delay just growing endlessly. it would work even if it did grow endlessly,
   // since we just always schedule the entity with the lowest delay (remember
   // actions add their cost to the entity's delay)
-  world_query(i, BITS(TurnSchedule)) {
+  WORLD_QUERY(i, BITS(TurnSchedule)) {
     PART(TurnSchedule, i).delay -= TURN_INTERVAL;
   }
 
@@ -125,7 +129,7 @@ static void process_turn_entity(void) {
 }
 
 static void execute_player_action(InputCommand command) {
-  EntityIndex player = entity_handle_to_index(WORLD.entities.player);
+  EntityIndex player = entity_handle_to_index(ENTITIES.player);
 
   // TODO: implement actual actions
   // For now, just basic movement/wait
@@ -182,7 +186,7 @@ void game_frame(WorldState *world, double dt) {
     WORLD.tick_accumulator -= TICK_INTERVAL;
   }
 
-  particles_update(dt);
+  particles_update(&WORLD.particles, dt);
 
   if (WORLD.anim.type != ACTION_ANIM_NONE) {
     EntityIndex actor = entity_handle_to_index(WORLD.anim.actor);
@@ -211,14 +215,14 @@ void game_frame(WorldState *world, double dt) {
   if (WORLD.anim.type == ACTION_ANIM_NONE && WORLD.turn_queue.count > 0) {
     EntityHandle next = turn_queue_peek();
 
-    if (entity_handle_equals(next, WORLD.entities.player)) {
+    if (entity_handle_equals(next, ENTITIES.player)) {
       // Player's turn - do we have input?
       if (WORLD.next_player_input != INPUT_CMD_NONE) {
         execute_player_action(WORLD.next_player_input);
         WORLD.next_player_input = INPUT_CMD_NONE;
       }
       // No input? Just wait (don't pop from queue)
-    } else if (entity_handle_equals(next, WORLD.entities.turn)) {
+    } else if (entity_handle_equals(next, ENTITIES.turn)) {
       process_turn_entity();
     } else {
       // NPC turn - will set anim if needed
@@ -347,7 +351,7 @@ void game_render(WorldState *world, RenderContext *ctx) {
   geobuilder_init(&geom, ctx);
 
   // Get player position for camera centering
-  EntityIndex player_idx = entity_handle_to_index(WORLD.entities.player);
+  EntityIndex player_idx = entity_handle_to_index(ENTITIES.player);
   float camera_center_x = 0.0f;
   float camera_center_y = 0.0f;
   int player_tile_x = 0;
@@ -387,7 +391,7 @@ void game_render(WorldState *world, RenderContext *ctx) {
   int offset_y = (int)(viewport_top_px - start_tile_y * ctx->tile_size);
 
   // Calculate chaotic torch flicker using combined non-linear waves
-  float t = WORLD.particle_time;
+  float t = WORLD.particles.time;
   float s1 = sinf(t * 3.1f);
   float s2 = sinf(t * 7.3f);
   float s3 = sinf(t * 13.7f);
@@ -416,7 +420,7 @@ void game_render(WorldState *world, RenderContext *ctx) {
   }
 
   // Draw entities with position
-  world_query(i, BITS(Position)) {
+  WORLD_QUERY(i, BITS(Position)) {
     Position *pos = &PART(Position, i);
 
     // Start with entity's actual position (in tile coordinates)
@@ -609,15 +613,15 @@ void game_render(WorldState *world, RenderContext *ctx) {
 
   // Get the most recent N messages
   int messages_to_show = MESSAGE_DISPLAY_LINES;
-  if (messages_to_show > (int)world->messages_count) {
-    messages_to_show = world->messages_count;
+  if (messages_to_show > (int)world->messages.count) {
+    messages_to_show = world->messages.count;
   }
 
   for (int i = 0; i < messages_to_show; i++) {
     // Get the i-th most recent message (counting from end)
-    int offset = (int)world->messages_count - messages_to_show + i;
-    int msg_idx = (world->messages_first + offset) % MESSAGE_COUNT_MAX;
-    const char *text = world->messages[msg_idx].text;
+    int offset = (int)world->messages.count - messages_to_show + i;
+    int msg_idx = (world->messages.first + offset) % MESSAGE_COUNT_MAX;
+    const char *text = world->messages.buffer[msg_idx].text;
 
     // Position from bottom up
     int y = ctx->viewport_height_px - (messages_to_show - i) * ctx->tile_size;

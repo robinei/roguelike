@@ -128,15 +128,15 @@ typedef struct {
   MARK(IsInventory)                                                            \
   MARK(IsDead)
 
+#define DO_DECLARE_BITSET(name) uint64_t name##Bitset[BITSET_WORDS];
 #define DO_DECLARE_PART(name, type)                                            \
-  uint64_t name##_bitset[BITSET_WORDS];                                        \
+  DO_DECLARE_BITSET(name)                                                      \
   type name[MAX_ENTITIES];
-#define DO_DECLARE_MARK(name) uint64_t name##_bitset[BITSET_WORDS];
 
 typedef struct {
+  FOREACH_MARK(DO_DECLARE_BITSET)
   FOREACH_PART(DO_DECLARE_PART)
-  FOREACH_MARK(DO_DECLARE_MARK)
 } PartsState;
 
+#undef DO_DECLARE_BITSET
 #undef DO_DECLARE_PART
-#undef DO_DECLARE_MARK
