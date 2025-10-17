@@ -84,6 +84,17 @@ static inline float clamp_float(float x, float min, float max) {
   return x;
 }
 
+void output_message(const char *fmt, ...);
+
+// ============================================================================
+// Static max Map dimensions
+// ============================================================================
+
+// exposed here so you don't have to know about Map to declare buffers which
+// correspond to what is used for Map
+#define MAP_WIDTH_MAX 512
+#define MAP_HEIGHT_MAX 512
+
 // ============================================================================
 // Elementary entity support
 // ============================================================================
@@ -110,34 +121,23 @@ typedef struct {
   uint16_t y;
 } Position;
 
-typedef enum {
+enum {
   DIR_N,
-  DIR_NE,
   DIR_E,
-  DIR_SE,
   DIR_S,
-  DIR_SW,
   DIR_W,
-  DIR_NW,
-} Direction;
+};
+typedef uint8_t Direction;
 
 static inline int dir_dx(Direction dir) {
   switch (dir) {
   case DIR_N:
     return 0;
-  case DIR_NE:
-    return 1;
   case DIR_E:
-    return 1;
-  case DIR_SE:
     return 1;
   case DIR_S:
     return 0;
-  case DIR_SW:
-    return -1;
   case DIR_W:
-    return -1;
-  case DIR_NW:
     return -1;
   default:
     return 0;
@@ -148,22 +148,29 @@ static inline int dir_dy(Direction dir) {
   switch (dir) {
   case DIR_N:
     return -1;
-  case DIR_NE:
-    return -1;
   case DIR_E:
     return 0;
-  case DIR_SE:
-    return 1;
   case DIR_S:
-    return 1;
-  case DIR_SW:
     return 1;
   case DIR_W:
     return 0;
-  case DIR_NW:
-    return -1;
   default:
     return 0;
+  }
+}
+
+static inline Direction dir_opposite(Direction dir) {
+  switch (dir) {
+  case DIR_N:
+    return DIR_S;
+  case DIR_E:
+    return DIR_W;
+  case DIR_S:
+    return DIR_N;
+  case DIR_W:
+    return DIR_E;
+  default:
+    return DIR_N;
   }
 }
 

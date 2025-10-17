@@ -8,24 +8,18 @@ let gl = null;
 let shaderProgram = null;
 let tileAtlas = null;
 
-// Game constants
-const TILE_SIZE = 12;
-const WORLD_STATE_SIZE = 1024 * 1024 * 16; // 16MB for world state (more than enough)
-
 // Input command enum (must match C enum)
 const InputCommand = {
   NONE: 0,
+
   UP: 1,
-  UP_RIGHT: 2,
-  RIGHT: 3,
-  DOWN_RIGHT: 4,
-  DOWN: 5,
-  DOWN_LEFT: 6,
-  LEFT: 7,
-  UP_LEFT: 8,
-  PERIOD: 9,
-  R: 10,
-  D: 11,
+  RIGHT: 2,
+  DOWN: 3,
+  LEFT: 4,
+
+  PERIOD: 5,
+  R: 6,
+  D: 7,
 };
 
 // WebGL shader sources
@@ -341,7 +335,7 @@ function gameLoop(currentTime) {
   gl.uniform2f(shaderProgram.uniformLocations.resolution, gl.canvas.width, gl.canvas.height);
 
   // Render game (calls back into JS via submit_geometry)
-  const tileSizeScaled = TILE_SIZE * 2; // 2x scaling
+  const tileSizeScaled = 12 * 2; // 2x scaling
   wasmExports.game_render_wasm(
     worldStatePtr,
     gl.canvas.width,

@@ -20,7 +20,7 @@ GAMELIB_TARGET = $(BUILDDIR)/libgame.so
 # ============================================================================
 WASM_CC = clang
 WASM_CFLAGS = -std=c99 -Wall -Wextra -O3 --target=wasm32
-WASM_LDFLAGS = -nostdlib -Wl,--no-entry -Wl,--export-all -Wl,--allow-undefined -Wl,--import-memory
+WASM_LDFLAGS = -nostdlib -Wl,--no-entry -Wl,--export-all -Wl,--allow-undefined -Wl,--import-memory -Wl,-z,stack-size=1048576
 WASM_OBJS = $(GAME_SRCS:%.c=$(BUILDDIR)/wasm/%.o)
 WASM_TARGET = $(BUILDDIR)/game.wasm
 

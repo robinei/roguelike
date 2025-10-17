@@ -1,11 +1,6 @@
 #pragma once
 
-#include "parts.h"
-#include <stdbool.h>
-#include <stdint.h>
-
-#define MAP_WIDTH_MAX 512
-#define MAP_HEIGHT_MAX 512
+#include "common.h"
 
 typedef struct {
   uint16_t passable : 1;

@@ -1,6 +1,7 @@
 #include "game.h"
 #include "actions/actions.h"
 #include "ai/ai.h"
+#include "ai/astar.h"
 #include "common.h"
 #include "flood.h"
 #include "fov.h"
@@ -13,7 +14,16 @@
 #include "render_api.h"
 #include "turn_queue.h"
 #include "world.h"
-#include <stdint.h>
+
+// ========================================================================
+// TEMPORARY: A* test cost function
+// ========================================================================
+static int32_t test_pathfinding_cost(void *ctx, int sx, int sy, int tx,
+                                     int ty) {
+  (void)ctx, (void)sx, (void)sy; // Unused
+  return MAP(tx, ty).passable ? 10 : ASTAR_COST_INFINITE;
+}
+// ========================================================================
 
 static void particle_emit_system_tick() {
   WORLD_QUERY(i, BITS(ParticleEmitter)) {
@@ -140,13 +150,9 @@ static void execute_player_action(InputCommand command) {
     break;
 
   case INPUT_CMD_UP:
-  case INPUT_CMD_UP_RIGHT:
   case INPUT_CMD_RIGHT:
-  case INPUT_CMD_DOWN_RIGHT:
   case INPUT_CMD_DOWN:
-  case INPUT_CMD_DOWN_LEFT:
   case INPUT_CMD_LEFT:
-  case INPUT_CMD_UP_LEFT:
     action_move(player, (Direction)(command - INPUT_CMD_UP));
     break;
 
@@ -475,6 +481,57 @@ void game_render(WorldState *world, RenderContext *ctx) {
     // TODO: Use glyph part or similar to determine tile
     geobuilder_tile(&geom, TILE_PLAYER, screen_x, screen_y);
   }
+
+  // ========================================================================
+  // TEMPORARY: Test A* pathfinding visualization
+  // ========================================================================
+  static Direction path_test[ASTAR_PATH_MAX_LENGTH];
+  static int path_len = -1;
+
+  // Recalculate path every frame (updates when entities move)
+  // Find first non-player entity with position
+  EntityIndex target = 0;
+  WORLD_QUERY(i, BITS(Position)) {
+    if (i != player_idx) {
+      target = i;
+      break;
+    }
+  }
+
+  if (target != 0 && HAS_PART(Position, player_idx)) {
+    Position *player_pos = &PART(Position, player_idx);
+    Position *target_pos = &PART(Position, target);
+
+    path_len = astar_find_path(NULL, test_pathfinding_cost, WORLD.map.width,
+                               WORLD.map.height, player_pos->x, player_pos->y,
+                               target_pos->x, target_pos->y, path_test);
+  }
+
+  // Draw the path with '*' character
+  if (path_len > 0) {
+    int px = player_tile_x;
+    int py = player_tile_y;
+
+    for (int i = 0; i < path_len; i++) {
+      // Move in direction
+      px += dir_dx(path_test[i]);
+      py += dir_dy(path_test[i]);
+
+      // Convert to screen coordinates
+      float world_px = px * ctx->tile_size;
+      float world_py = py * ctx->tile_size;
+      int scr_x = (int)(world_px - viewport_left_px);
+      int scr_y = (int)(world_py - viewport_top_px);
+
+      // Draw '*' using text (scale=1.0, left-align, yellow on transparent)
+      Color transparent = {0, 0, 0, 0};
+      geobuilder_text(&geom, scr_x, scr_y, 1.0f, TEXT_ALIGN_LEFT, transparent,
+                      "*");
+    }
+  }
+  // ========================================================================
+  // END TEMPORARY TEST CODE
+  // ========================================================================
 
   // Draw interpolated torch lighting (actually draw the darkness), and water
   // overlays

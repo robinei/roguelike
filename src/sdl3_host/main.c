@@ -228,14 +228,6 @@ static InputCommand map_key_to_command(SDL_Keycode key) {
   case SDLK_RIGHT:
   case SDLK_L:
     return INPUT_CMD_RIGHT;
-  case SDLK_Y:
-    return INPUT_CMD_UP_LEFT;
-  case SDLK_U:
-    return INPUT_CMD_UP_RIGHT;
-  case SDLK_B:
-    return INPUT_CMD_DOWN_LEFT;
-  case SDLK_N:
-    return INPUT_CMD_DOWN_RIGHT;
   case SDLK_PERIOD:
     return INPUT_CMD_PERIOD;
   case SDLK_D:
