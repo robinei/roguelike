@@ -1,4 +1,5 @@
 #include "world.h"
+#include "common.h"
 
 #define PRNF_SUPPORT_FLOAT
 #define PRNF_SUPPORT_DOUBLE
@@ -143,6 +144,11 @@ void entity_free(EntityIndex index) {
 
 bool entity_is_player(EntityIndex index) {
   return entity_handle_to_index(ENTITIES.player) == index;
+}
+
+bool entity_is_alive(EntityHandle handle) {
+  return entity_handle_is_valid(handle) &&
+         !HAS_PART(IsDead, entity_handle_to_index(handle));
 }
 
 EntityIndex get_position_ancestor(EntityIndex entity) {

@@ -175,9 +175,13 @@ extern WorldState *active_world;
 // EntityHandle
 // ============================================================================
 
-static inline EntityIndex entity_handle_to_index(EntityHandle handle) {
+static inline EntityIndex entity_handle_is_valid(EntityHandle handle) {
   assert(handle._index < ENTITIES.count);
-  assert(ENTITIES.generation[handle._index] == handle._generation);
+  return ENTITIES.generation[handle._index] == handle._generation;
+}
+
+static inline EntityIndex entity_handle_to_index(EntityHandle handle) {
+  assert(entity_handle_is_valid(handle));
   return handle._index;
 }
 
@@ -228,5 +232,6 @@ EntityIndex entity_alloc(void);
 void entity_free(EntityIndex index);
 
 bool entity_is_player(EntityIndex index);
+bool entity_is_alive(EntityHandle index);
 EntityIndex get_position_ancestor(EntityIndex entity);
 EntityIndex get_attributes_ancestor(EntityIndex entity);

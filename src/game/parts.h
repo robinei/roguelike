@@ -15,11 +15,6 @@
 
 #define HEALTH_FULL 100
 
-typedef struct {
-  uint16_t x;
-  uint16_t y;
-} Position;
-
 // Base attributes (on character entity)
 typedef struct {
   uint8_t str : 4;

@@ -2,40 +2,35 @@
 #include "../events/events.h"
 #include "../world.h"
 
-GoalIndex aistate_alloc_goal(AIState *ai, GoalType type,
-                             GoalIndex original_intent, GoalIndex next) {
+GoalIndex aistate_push_goal(AIState *ai, Goal goal) {
   if (ai->goals_freelist_count > 0) {
     return ai->goals_freelist[--ai->goals_freelist_count];
   }
   if (ai->goals_count >= MAX_GOALS) {
     return 0;
   }
-  GoalIndex goal = ai->goals_count++;
-  ai->goals[goal] =
-      (Goal){.type = type, .original_intent = original_intent, .next = next};
-  return goal;
+  GoalIndex index = ai->goals_count++;
+  ai->goals[index] = goal;
+  return index;
 }
 
-void aistate_free_goal(AIState *ai, GoalIndex goal) {
-  if (goal == ai->goals_count - 1) {
+void aistate_free_goal(AIState *ai, GoalIndex index) {
+  if (index == ai->goals_count - 1) {
     --ai->goals_count;
   } else {
-    ai->goals_freelist[ai->goals_freelist_count++] = goal;
+    ai->goals_freelist[ai->goals_freelist_count++] = index;
   }
-  ai->goals[goal] = (Goal){};
+  ai->goals[index] = (Goal){};
 }
 
-GoalIndex entity_push_goal(EntityIndex entity, GoalType type,
-                           GoalIndex original_intent) {
-  GoalIndex prev = 0;
+GoalIndex entity_push_goal(EntityIndex entity, Goal goal) {
   if (HAS_PART(Goals, entity)) {
-    prev = PART(Goals, entity);
+    goal.next = PART(Goals, entity);
   } else {
+    goal.next = 0;
     ADD_PART(Goals, entity, 0);
   }
-  GoalIndex goal = aistate_alloc_goal(&WORLD.ai, type, original_intent, prev);
-  PART(Goals, entity) = goal;
-  return goal;
+  return PART(Goals, entity) = aistate_push_goal(&WORLD.ai, goal);
 }
 
 Goal *entity_peek_goal(EntityIndex entity) {
@@ -60,11 +55,15 @@ void entity_pop_goal(EntityIndex entity) {
   aistate_free_goal(&WORLD.ai, goal);
 }
 
-void entity_update_ai(EntityIndex entity) {
+void entity_take_action(EntityIndex entity) {
+  if (!HAS_PART(Goals, entity)) {
+    return;
+  }
+
   for (;;) {
     Goal *goal = entity_peek_goal(entity);
     if (!goal) {
-      entity_push_goal(entity, GOAL_IDLE, 0);
+      entity_push_goal(entity, (Goal){.type = GOAL_IDLE});
       continue;
     }
 
@@ -79,6 +78,9 @@ void entity_update_ai(EntityIndex entity) {
       break; // do nothing. don't finish
     case GOAL_IDLE:
       entity_event_take_action_idle(entity);
+      break;
+    case GOAL_KILL:
+      entity_event_take_action_murder(entity, goal);
       break;
     }
 

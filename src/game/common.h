@@ -102,8 +102,13 @@ static inline bool entity_handle_equals(EntityHandle a, EntityHandle b) {
 }
 
 // ============================================================================
-// Direction
+// Position + Direction
 // ============================================================================
+
+typedef struct {
+  uint16_t x;
+  uint16_t y;
+} Position;
 
 typedef enum {
   DIR_N,

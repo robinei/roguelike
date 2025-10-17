@@ -72,7 +72,7 @@ void game_init(WorldState *world, uint64_t rng_seed) {
   entity_alloc();
 
   // goal at index 0 should not be used (index 0 means "no goal")
-  aistate_alloc_goal(&WORLD.ai, GOAL_NONE, 0, 0);
+  aistate_push_goal(&WORLD.ai, (Goal){});
 
   EntityIndex turn_index = entity_alloc();
   ENTITIES.turn = entity_handle_from_index(turn_index);
