@@ -92,8 +92,14 @@ void output_message(const char *fmt, ...);
 
 // exposed here so you don't have to know about Map to declare buffers which
 // correspond to what is used for Map
-#define MAP_WIDTH_MAX 512
-#define MAP_HEIGHT_MAX 512
+#define MAP_CHUNK_WIDTH 80
+#define MAP_CHUNK_HEIGHT 80
+#define MAP_CHUNK_WINDOW_X 3
+#define MAP_CHUNK_WINDOW_Y 3
+#define MAP_CHUNK_TOTAL_X 100
+#define MAP_CHUNK_TOTAL_Y 70
+#define MAP_WIDTH_MAX (MAP_CHUNK_WIDTH * MAP_CHUNK_WINDOW_X)
+#define MAP_HEIGHT_MAX (MAP_CHUNK_HEIGHT * MAP_CHUNK_WINDOW_Y)
 
 // ============================================================================
 // Elementary entity support

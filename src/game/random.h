@@ -26,6 +26,7 @@ IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE. */
    It is a very fast generator passing BigCrush, and it can be useful if
    for some reason you absolutely want 64 bits of state. */
 
+// Generate a random 64-bit number based on WORLD.rng_state
 static inline uint64_t random64(void) { // aka splitmix64
   uint64_t z = (WORLD.rng_state += 0x9e3779b97f4a7c15);
   z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9;
@@ -33,6 +34,7 @@ static inline uint64_t random64(void) { // aka splitmix64
   return z ^ (z >> 31);
 }
 
+// Generate a random floating point number based on WORLD.rng_state
 static inline float randomf(void) {
   return (float)random64() / (float)UINT64_MAX;
 }

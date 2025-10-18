@@ -47,7 +47,8 @@ static void particle_emit_system_tick() {
 
 static EntityIndex spawn_player(void) {
   Position pos;
-  if (!map_get_random_passable(&WORLD.map, &pos, 100)) {
+  if (!map_get_random_passable(&WORLD.map, MAP_CHUNK_WIDTH, MAP_CHUNK_WIDTH,
+                               MAP_CHUNK_WIDTH, MAP_CHUNK_WIDTH, &pos, 1000)) {
     // Fallback to 0,0 if no passable position found
     pos.x = 0;
     pos.y = 0;
@@ -62,7 +63,8 @@ static EntityIndex spawn_player(void) {
 
 static EntityIndex spawn_monster(void) {
   Position pos;
-  if (!map_get_random_passable(&WORLD.map, &pos, 100)) {
+  if (!map_get_random_passable(&WORLD.map, MAP_CHUNK_WIDTH, MAP_CHUNK_WIDTH,
+                               MAP_CHUNK_WIDTH, MAP_CHUNK_WIDTH, &pos, 100)) {
     // Failed to find passable position, don't spawn
     return 0;
   }
@@ -89,8 +91,15 @@ void game_init(WorldState *world, uint64_t rng_seed) {
   turn_queue_insert(turn_index, TURN_INTERVAL);
 
   // Generate map before spawning entities
-  WORLD.map.width = 64;
-  WORLD.map.height = 64;
+  WORLD.map.width = MAP_WIDTH_MAX;
+  WORLD.map.height = MAP_HEIGHT_MAX;
+
+  for (int y = 0; y < MAP_HEIGHT_MAX; y++) {
+    for (int x = 0; x < MAP_WIDTH_MAX; x++) {
+      WORLD.map.cells[y * MAP_WIDTH_MAX + x].passable = 1;
+      WORLD.map.cells[y * MAP_WIDTH_MAX + x].tile = TILE_FLOOR;
+    }
+  }
 
   BSPGenParams bsp_params = {
       .max_depth = 5,        // More depth = more rooms
@@ -101,7 +110,8 @@ void game_init(WorldState *world, uint64_t rng_seed) {
       .room_padding = 2,     // Padding around rooms within regions
       .map_border = 0,       // Keep 1 tile away from map edge
   };
-  mapgen_bsp(&WORLD.map, &bsp_params);
+  mapgen_bsp_region(&WORLD.map, MAP_CHUNK_WIDTH, MAP_CHUNK_HEIGHT,
+                    MAP_CHUNK_WIDTH, MAP_CHUNK_HEIGHT, &bsp_params);
 
   // Spawn player and monsters in random passable positions
   ENTITIES.player = entity_handle_from_index(spawn_player());

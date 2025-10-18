@@ -15,6 +15,16 @@ typedef struct {
   uint8_t water_depth[MAP_WIDTH_MAX * MAP_HEIGHT_MAX];
 } Map;
 
+typedef struct {
+
+} MapChunk;
+
+typedef struct {
+
+} WorldMap;
+
 // Get a random passable position on the map
 // Returns false if no passable position found after max_attempts
-bool map_get_random_passable(Map *map, Position *out_pos, int max_attempts);
+bool map_get_random_passable(Map *map, int region_x, int region_y,
+                             int region_width, int region_height,
+                             Position *out_pos, int max_attempts);

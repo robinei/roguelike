@@ -240,9 +240,23 @@ static void draw_rooms(Map *map, BSPNode *node) {
 }
 
 void mapgen_bsp(Map *map, const BSPGenParams *params) {
-  // Initialize map as all walls
-  for (int y = 0; y < map->height; y++) {
-    for (int x = 0; x < map->width; x++) {
+  // Generate in full map with border
+  int border = params->map_border;
+  mapgen_bsp_region(map, border, border, map->width - border * 2,
+                    map->height - border * 2, params);
+}
+
+void mapgen_bsp_region(Map *map, int region_x, int region_y, int region_width,
+                       int region_height, const BSPGenParams *params) {
+  // Validate region bounds
+  if (region_x < 0 || region_y < 0 || region_x + region_width > map->width ||
+      region_y + region_height > map->height) {
+    return; // Invalid region
+  }
+
+  // Initialize region as all walls
+  for (int y = region_y; y < region_y + region_height; y++) {
+    for (int x = region_x; x < region_x + region_width; x++) {
       map->cells[y * MAP_WIDTH_MAX + x].passable = 0;
       map->cells[y * MAP_WIDTH_MAX + x].tile = TILE_WALL;
     }
@@ -251,10 +265,8 @@ void mapgen_bsp(Map *map, const BSPGenParams *params) {
   // Reset node pool
   node_count = 0;
 
-  // Create root node with border around the map edge
-  int border = params->map_border;
-  BSPNode *root = alloc_node(border, border, map->width - border * 2,
-                             map->height - border * 2);
+  // Create root node for the specified region
+  BSPNode *root = alloc_node(region_x, region_y, region_width, region_height);
   if (!root)
     return;
 

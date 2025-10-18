@@ -12,4 +12,11 @@ typedef struct {
   int map_border;             // Border around the entire map edge
 } BSPGenParams;
 
+// Generate BSP dungeon in the entire map (with border)
 void mapgen_bsp(Map *map, const BSPGenParams *params);
+
+// Generate BSP dungeon in a specific rectangular region of the map
+// Useful for chunk-based generation or composing multiple generators
+void mapgen_bsp_region(Map *map, int region_x, int region_y,
+                       int region_width, int region_height,
+                       const BSPGenParams *params);
