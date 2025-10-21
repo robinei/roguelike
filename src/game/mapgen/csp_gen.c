@@ -1,9 +1,10 @@
 #include "../random.h"
 #include "mapgen.h"
-#include <stdlib.h>
 
 // Small-scale subsea terrain types
 typedef enum {
+  TERRAIN_NONE,
+
   TERRAIN_SEDIMENT,          // Soft muddy/sandy floor (common, passable)
   TERRAIN_ROCK,              // Exposed bedrock
   TERRAIN_BOULDER_FIELD,     // Scattered large rocks
@@ -24,19 +25,21 @@ static int terrain_affinity[TERRAIN_COUNT][TERRAIN_COUNT];
 
 // Visual tile mapping for each terrain type
 static const int terrain_tiles[] = {
-    [TERRAIN_SEDIMENT] = 1253,
-    [TERRAIN_ROCK] = 1254,
-    [TERRAIN_BOULDER_FIELD] = 1047,
-    [TERRAIN_VOLCANIC_ROCK] = 1255,
-    [TERRAIN_HYDROTHERMAL_VENT] = 7014,
-    [TERRAIN_CORAL_GARDEN] = 1046,
-    [TERRAIN_KELP] = 1045,
-    [TERRAIN_CREVASSE] = 1442,
-    [TERRAIN_PILLOW_LAVA] = 1044,
+    [TERRAIN_NONE] = 10299,             //
+    [TERRAIN_SEDIMENT] = 1253,          //
+    [TERRAIN_ROCK] = 1254,              //
+    [TERRAIN_BOULDER_FIELD] = 1047,     //
+    [TERRAIN_VOLCANIC_ROCK] = 1255,     //
+    [TERRAIN_HYDROTHERMAL_VENT] = 7014, //
+    [TERRAIN_CORAL_GARDEN] = 1046,      //
+    [TERRAIN_KELP] = 1045,              //
+    [TERRAIN_CREVASSE] = 1442,          //
+    [TERRAIN_PILLOW_LAVA] = 1044,       //
 };
 
 // Passability for each terrain type
 static const bool terrain_passable[] = {
+    [TERRAIN_NONE] = true,
     [TERRAIN_SEDIMENT] = true,
     [TERRAIN_ROCK] = true,
     [TERRAIN_BOULDER_FIELD] = true,
@@ -140,33 +143,42 @@ static void init_terrain_affinity(void) {
 
 // Score a terrain choice at position (x, y) based on neighbor affinities
 // Higher score = better placement
-static int score_terrain(TerrainType *terrain_map, int width, int height, int x,
-                         int y, TerrainType terrain, int radius) {
+// Works directly on map coordinates, samples anywhere within map bounds
+static int score_terrain(Map *map, int x, int y, TerrainType terrain,
+                         int radius) {
   int score = 0;
+  int count = 0;
 
   // Check all neighbors within radius
   for (int dy = -radius; dy <= radius; dy++) {
     for (int dx = -radius; dx <= radius; dx++) {
-      if (dx == 0 && dy == 0)
+      if (dx == 0 && dy == 0) {
         continue; // Skip self
+      }
 
       int nx = x + dx;
       int ny = y + dy;
 
-      // Skip out of bounds
-      if (nx < 0 || nx >= width || ny < 0 || ny >= height) {
-        continue;
+      // Check bounds (avoid buffer overrun)
+      if (nx < 0 || nx >= map->width || ny < 0 || ny >= map->height) {
+        continue; // Out of bounds, skip
       }
 
-      int neighbor_idx = ny * width + nx;
-      TerrainType neighbor = terrain_map[neighbor_idx];
+      int map_idx = ny * MAP_WIDTH_MAX + nx;
+      TerrainType neighbor = (TerrainType)map->cells[map_idx].category;
+
+      // Skip ungenerated tiles (category 0 is unused/ungenerated)
+      if (neighbor == 0) {
+        continue; // Treat as unknown, don't constrain against it
+      }
 
       // Add affinity score (positive for good adjacency, negative for bad)
       score += terrain_affinity[terrain][neighbor];
+      ++count;
     }
   }
 
-  return score;
+  return count > 0 ? (score * (4 * radius * radius - 1)) / count : score;
 }
 
 // Generate random terrain according to weighted distribution
@@ -190,6 +202,7 @@ static TerrainType random_weighted_terrain(const int *weights, int count) {
 }
 
 // Generate terrain using Constraint Satisfaction with Local Minimum Conflicts
+// Works directly on the map's category field within the specified region
 void mapgen_csp_region(Map *map, int region_x, int region_y, int region_width,
                        int region_height, const CSPGenParams *params) {
   // Validate region bounds
@@ -205,33 +218,27 @@ void mapgen_csp_region(Map *map, int region_x, int region_y, int region_width,
     affinity_initialized = true;
   }
 
-  // Allocate terrain type map
-  TerrainType *terrain_map =
-      malloc(region_width * region_height * sizeof(TerrainType));
-  if (!terrain_map)
-    return;
-
-  // Step 1: Random initialization according to distribution
-  for (int y = 0; y < region_height; y++) {
-    for (int x = 0; x < region_width; x++) {
-      int idx = y * region_width + x;
-      terrain_map[idx] =
+  // Step 1: Random initialization - write directly to map.category
+  for (int y = region_y; y < region_y + region_height; y++) {
+    for (int x = region_x; x < region_x + region_width; x++) {
+      int map_idx = y * MAP_WIDTH_MAX + x;
+      TerrainType terrain =
           random_weighted_terrain(default_weights, TERRAIN_COUNT);
+      map->cells[map_idx].category = terrain;
     }
   }
 
   // Step 2: Iterative refinement - maximize affinity score
-  const int check_radius = 3; // How far to check for neighbor affinities
+  const int check_radius = 2; // How far to check for neighbor affinities
 
   for (int iter = 0; iter < params->iterations; iter++) {
-    // Pick a random tile
-    int x = random64() % region_width;
-    int y = random64() % region_height;
-    int idx = y * region_width + x;
+    // Pick a random tile within the region
+    int x = region_x + (random64() % region_width);
+    int y = region_y + (random64() % region_height);
+    int map_idx = y * MAP_WIDTH_MAX + x;
 
-    TerrainType current = terrain_map[idx];
-    int current_score = score_terrain(terrain_map, region_width, region_height,
-                                      x, y, current, check_radius);
+    TerrainType current = (TerrainType)map->cells[map_idx].category;
+    int current_score = score_terrain(map, x, y, current, check_radius);
 
     TerrainType best = current;
     int best_score = current_score;
@@ -241,9 +248,7 @@ void mapgen_csp_region(Map *map, int region_x, int region_y, int region_width,
       TerrainType candidate =
           random_weighted_terrain(default_weights, TERRAIN_COUNT);
 
-      int candidate_score =
-          score_terrain(terrain_map, region_width, region_height, x, y,
-                        candidate, check_radius);
+      int candidate_score = score_terrain(map, x, y, candidate, check_radius);
 
       // Keep the one with highest score (best affinity)
       if (candidate_score > best_score) {
@@ -252,34 +257,24 @@ void mapgen_csp_region(Map *map, int region_x, int region_y, int region_width,
       }
     }
 
-    // Apply the best choice
-    terrain_map[idx] = best;
+    // Apply the best choice directly to map
+    map->cells[map_idx].category = best;
   }
 
-  // Step 3: Apply terrain to map
-  for (int y = 0; y < region_height; y++) {
-    for (int x = 0; x < region_width; x++) {
-      int map_x = region_x + x;
-      int map_y = region_y + y;
+  // Step 3: Set tile and passable based on category
+  for (int y = region_y; y < region_y + region_height; y++) {
+    for (int x = region_x; x < region_x + region_width; x++) {
+      int map_idx = y * MAP_WIDTH_MAX + x;
+      TerrainType terrain = (TerrainType)map->cells[map_idx].category;
 
-      if (map_x >= 0 && map_x < map->width && map_y >= 0 &&
-          map_y < map->height) {
-        int map_idx = map_y * MAP_WIDTH_MAX + map_x;
-        int terrain_idx = y * region_width + x;
+      map->cells[map_idx].tile = terrain_tiles[terrain];
+      map->cells[map_idx].passable = terrain_passable[terrain];
+      map->cells[map_idx].visible = true;
 
-        TerrainType terrain = terrain_map[terrain_idx];
-
-        map->cells[map_idx].tile = terrain_tiles[terrain];
-        map->cells[map_idx].passable = terrain_passable[terrain];
-        map->cells[map_idx].visible = true;
-
-        // Set water depth (all subsea terrain is underwater)
-        map->water_depth[map_idx] = 255; // Deep water
-      }
+      // Set water depth (all subsea terrain is underwater)
+      map->water_depth[map_idx] = 255; // Deep water
     }
   }
-
-  free(terrain_map);
 }
 
 // Full-map CSP generation

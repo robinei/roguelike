@@ -92,8 +92,8 @@ void output_message(const char *fmt, ...);
 
 // exposed here so you don't have to know about Map to declare buffers which
 // correspond to what is used for Map
-#define MAP_CHUNK_WIDTH 80
-#define MAP_CHUNK_HEIGHT 80
+#define MAP_CHUNK_WIDTH 84
+#define MAP_CHUNK_HEIGHT 84
 #define MAP_CHUNK_WINDOW_X 3
 #define MAP_CHUNK_WINDOW_Y 3
 #define MAP_CHUNK_TOTAL_X 100

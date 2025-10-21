@@ -98,8 +98,9 @@ typedef struct {
   MessageState messages;
   TurnQueue turn_queue;
   ParticlesState particles;
-  Map map;
   ActionAnim anim;
+  Map map;
+  WorldMap worldmap;
 
   InputCommand next_player_input; // Next input to execute for player
 

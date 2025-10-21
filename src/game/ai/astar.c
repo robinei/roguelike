@@ -216,8 +216,8 @@ int astar_find_path(void *ctx, AStarCostFunction cost_func, int map_width,
 
     // Reached goal?
     if (cx == tx && cy == ty) {
-      output_message("pushed_count: %d, popped_count: %d", pushed_count,
-                     popped_count);
+      // output_message("pushed_count: %d, popped_count: %d", pushed_count,
+      //                popped_count);
       return reconstruct_path(cells, sx, sy, tx, ty, moves_out);
     }
 

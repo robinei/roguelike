@@ -1,11 +1,13 @@
 #pragma once
 
 #include "common.h"
+#include <stdbool.h>
 
 typedef struct {
-  uint16_t passable : 1;
-  uint16_t visible : 1;
-  uint16_t tile : 14;
+  uint32_t passable : 1;
+  uint32_t visible : 1;
+  uint32_t tile : 14;
+  uint32_t category : 4;
 } MapCell;
 
 typedef struct {
@@ -16,11 +18,14 @@ typedef struct {
 } Map;
 
 typedef struct {
-
+  bool generated;
 } MapChunk;
 
 typedef struct {
-
+  // current (center) chunk
+  int curr_chunk_x;
+  int curr_chunk_y;
+  MapChunk chunks[MAP_CHUNK_TOTAL_X * MAP_CHUNK_TOTAL_Y];
 } WorldMap;
 
 // Get a random passable position on the map

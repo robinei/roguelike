@@ -13,6 +13,7 @@
 #define WHITE_TILE_INDEX 10711
 
 typedef enum {
+  TILE_NONE = 10299,
   TILE_FLOOR = 1042,
   TILE_WALL = 618,
   TILE_PLAYER = 113,
@@ -96,10 +97,11 @@ void geobuilder_tile(GeometryBuilder *geom, int tile_index, int x, int y);
 void geobuilder_rect(GeometryBuilder *geom, int x, int y, int w, int h,
                      Color color);
 
-// Push a colored rect with per-vertex colors (6 vertices using white tile center)
-// Colors are specified for each corner: top-left, top-right, bottom-left, bottom-right
+// Push a colored rect with per-vertex colors (6 vertices using white tile
+// center) Colors are specified for each corner: top-left, top-right,
+// bottom-left, bottom-right
 void geobuilder_rect_colored(GeometryBuilder *geom, int x, int y, int w, int h,
-                              Color tl, Color tr, Color bl, Color br);
+                             Color tl, Color tr, Color bl, Color br);
 
 // Text rendering alignment
 typedef enum {

@@ -2,10 +2,17 @@
 #include "../world.h"
 #include "actions.h"
 
+// Forward declare from game.c
+extern void ensure_chunks_around_position(int x, int y);
+
 void on_player_moved(void) {
   EntityIndex player_idx = entity_handle_to_index(ENTITIES.player);
   if (HAS_PART(Position, player_idx)) {
     Position *pos = &PART(Position, player_idx);
+
+    // Generate chunks around player as they move
+    ensure_chunks_around_position(pos->x, pos->y);
+
     fov_compute(&WORLD.map, pos->x, pos->y, PLAYER_FOV_RADIUS);
   }
 }
@@ -41,6 +48,4 @@ void action_move(EntityIndex entity, Direction dir) {
                             .move = {.from = *pos, .to = {x, y}}};
 
   *pos = (Position){x, y};
-
-  on_player_moved();
 }
