@@ -101,6 +101,7 @@ void game_init(WorldState *world, uint64_t rng_seed) {
     }
   }
 
+#if 0
   BSPGenParams bsp_params = {
       .max_depth = 5,        // More depth = more rooms
       .min_region_size = 10, // Stop splitting small regions
@@ -112,6 +113,14 @@ void game_init(WorldState *world, uint64_t rng_seed) {
   };
   mapgen_bsp_region(&WORLD.map, MAP_CHUNK_WIDTH, MAP_CHUNK_HEIGHT,
                     MAP_CHUNK_WIDTH, MAP_CHUNK_HEIGHT, &bsp_params);
+#else
+  CSPGenParams csp_params = {
+      .iterations = 100000,   // Number of refinement iterations
+      .attempts_per_tile = 5, // Random attempts per tile
+  };
+  mapgen_csp_region(&WORLD.map, MAP_CHUNK_WIDTH, MAP_CHUNK_HEIGHT,
+                    MAP_CHUNK_WIDTH, MAP_CHUNK_HEIGHT, &csp_params);
+#endif
 
   // Spawn player and monsters in random passable positions
   ENTITIES.player = entity_handle_from_index(spawn_player());
@@ -558,6 +567,7 @@ void game_render(WorldState *world, RenderContext *ctx) {
         // Draw water overlay on ALL tiles (after lighting/darkness)
         uint8_t water_depth =
             world->map.water_depth[tile_y * MAP_WIDTH_MAX + tile_x];
+        water_depth = 0;
         if (water_depth > 0) {
           // Check if neighbors have different depths (need interpolation)
           uint8_t left =

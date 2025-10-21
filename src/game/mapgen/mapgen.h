@@ -20,3 +20,16 @@ void mapgen_bsp(Map *map, const BSPGenParams *params);
 void mapgen_bsp_region(Map *map, int region_x, int region_y,
                        int region_width, int region_height,
                        const BSPGenParams *params);
+
+typedef struct {
+  int iterations;        // Number of refinement iterations
+  int attempts_per_tile; // Number of random attempts per tile
+} CSPGenParams;
+
+// Generate terrain using Constraint Satisfaction with Local Minimum Conflicts
+void mapgen_csp(Map *map, const CSPGenParams *params);
+
+// Generate CSP terrain in a specific rectangular region of the map
+void mapgen_csp_region(Map *map, int region_x, int region_y,
+                       int region_width, int region_height,
+                       const CSPGenParams *params);
