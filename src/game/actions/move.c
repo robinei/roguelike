@@ -2,9 +2,6 @@
 #include "../world.h"
 #include "actions.h"
 
-// Forward declare from game.c
-extern void ensure_chunks_around_position(int x, int y);
-
 void on_player_moved(void) {
   EntityIndex player_idx = entity_handle_to_index(ENTITIES.player);
   if (HAS_PART(Position, player_idx)) {

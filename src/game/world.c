@@ -1,5 +1,6 @@
 #include "world.h"
 #include "common.h"
+#include "parts.h"
 
 #define PRNF_SUPPORT_FLOAT
 #define PRNF_SUPPORT_DOUBLE
@@ -48,7 +49,7 @@ void entityset_add(EntitySet *set, EntityIndex index) {
 
 void entityset_expand_descendants(EntitySet *set) {
   // Track visited entities to avoid redundant parent chain walks
-  uint64_t visited[BITSET_WORDS];
+  uint64_t visited[ENTITY_BITSET_WORDS];
 
   // Pre-populate visited with entities already in the set
   bitset_copy(visited, set->bitset);
@@ -173,4 +174,64 @@ EntityIndex get_attributes_ancestor(EntityIndex entity) {
     }
     entity = PART(Parent, entity);
   }
+}
+
+void entity_pack(EntityIndex entity, ByteBuffer *buf) {
+  PartBitset part_bitset = {0};
+  uint8_t *part_bitset_ptr = buf->data + buf->size;
+
+  // initially write empty bitset to buffer
+  bbuf_pack_bytes(buf, &part_bitset, sizeof(part_bitset));
+
+#define DO_PACK_MARK(name)                                                     \
+  if (HAS_PART(name, entity)) {                                                \
+    part_bitset_add(&part_bitset, PART_TYPE_##name);                           \
+  }
+
+#define DO_PACK_PART(name, type)                                               \
+  if (HAS_PART(name, entity)) {                                                \
+    part_bitset_add(&part_bitset, PART_TYPE_##name);                           \
+    bbuf_pack_bytes(buf, &PART(name, entity), sizeof(PART(name, entity)));     \
+  }
+
+  FOREACH_MARK(DO_PACK_MARK)
+  FOREACH_PART(DO_PACK_PART)
+
+#undef DO_SET_MARK_BIT
+#undef DO_PACK_PART
+
+  assert(buf->size <= buf->capacity);
+
+  // go back and overwrite empty bitset in buffer
+  memcpy(part_bitset_ptr, &part_bitset, sizeof(part_bitset));
+}
+
+EntityIndex entity_unpack(ByteBuffer *buf) {
+  EntityIndex entity = entity_alloc();
+
+  uint32_t offset = 0;
+  PartBitset part_bitset;
+  bbuf_unpack_bytes(buf, &offset, &part_bitset, sizeof(part_bitset));
+  assert(offset == sizeof(part_bitset));
+
+#define DU_UNPACK_MARK(name)                                                   \
+  if (part_bitset_test(&part_bitset, PART_TYPE_##name)) {                      \
+    ENABLE_PART(name, entity);                                                 \
+  }
+
+#define DU_UNPACK_PART(name, type)                                             \
+  if (part_bitset_test(&part_bitset, PART_TYPE_##name)) {                      \
+    ENABLE_PART(name, entity);                                                 \
+    offset = 0;                                                                \
+    bbuf_unpack_bytes(buf, &offset, &PART(name, entity), sizeof(type));        \
+    assert(offset == sizeof(type));                                            \
+  }
+
+  FOREACH_MARK(DU_UNPACK_MARK)
+  FOREACH_PART(DU_UNPACK_PART)
+
+#undef DO_SET_MARK_BIT
+#undef DU_UNPACK_PART
+
+  return entity;
 }

@@ -1,25 +1,35 @@
-#include "../game/render_api.h"
-#include "../game/world.h"
+#include "../game/api.h"
 #include "atlas_view.h"
+#include "storage_file.h"
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_keycode.h>
+#include <SDL3/SDL_log.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 
-// Game API function pointers (loaded dynamically)
-typedef void (*GameInitFunc)(WorldState *world, uint64_t rng_seed);
-typedef void (*GameFrameFunc)(WorldState *world, double dt);
-typedef void (*GameRenderFunc)(WorldState *world, RenderContext *ctx);
-typedef void (*GameInputFunc)(WorldState *world, InputCommand command);
+static StorageFile save_file;
+static size_t state_memory_size;
+static void *state_memory;
+static uint64_t random_seed;
 
 typedef struct {
   void *lib_handle;
   SDL_Time lib_mtime;
-  GameInitFunc game_init;
-  GameFrameFunc game_frame;
-  GameRenderFunc game_render;
-  GameInputFunc game_input;
+
+  GameSetHostFunctionsFn game_set_host_functions;
+  GameGetMemorySizeFn game_get_memory_size;
+  GameSetMemoryFn game_set_memory;
+  GameInitFn game_init;
+  GameInputFn game_input;
+  GameFrameFn game_frame;
+  GameRenderFn game_render;
+  GameChunkStoredFn game_chunk_stored;
+  GameChunkLoadedFn game_chunk_loaded;
 } GameAPI;
+
+static GameAPI game_api;
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
@@ -44,6 +54,8 @@ typedef struct {
   int scale;                 // Tile scaling factor (1, 2, or 3)
   int scaled_tile_size;      // TILE_SIZE * scale (cached)
 } Renderer;
+
+static Renderer renderer;
 
 #define MESSAGE_DISPLAY_LINES 6 // Number of message lines to show
 
@@ -151,6 +163,69 @@ static void shutdown_renderer(Renderer *r) {
   SDL_Quit();
 }
 
+static InputCommand map_key_to_command(SDL_Keycode key) {
+  switch (key) {
+  case SDLK_UP:
+  case SDLK_K:
+    return INPUT_CMD_UP;
+  case SDLK_DOWN:
+  case SDLK_J:
+    return INPUT_CMD_DOWN;
+  case SDLK_LEFT:
+  case SDLK_H:
+    return INPUT_CMD_LEFT;
+  case SDLK_RIGHT:
+  case SDLK_L:
+    return INPUT_CMD_RIGHT;
+  case SDLK_PERIOD:
+    return INPUT_CMD_PERIOD;
+  case SDLK_D:
+    return INPUT_CMD_D;
+  default:
+    return INPUT_CMD_NONE; // Invalid
+  }
+}
+
+static HOST_LOG_SIG(do_log) {
+  switch (level) {
+  case LOG_DEBUG:
+  case LOG_LOG:
+    SDL_LogDebug(SDL_LOG_CATEGORY_APPLICATION, "%s", message);
+    break;
+  case LOG_INFO:
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "%s", message);
+    break;
+  case LOG_WARN:
+    SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "%s", message);
+    break;
+  case LOG_ERROR:
+    SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "%s", message);
+    break;
+  }
+}
+
+static HOST_SUBMIT_GEOMETRY_SIG(do_submit_geometry) {
+  // Cast our Vertex format directly to SDL_Vertex
+  // They have identical layout by design
+  SDL_RenderGeometry(renderer.renderer, renderer.atlas_texture,
+                     (const SDL_Vertex *)vertices, vertex_count, NULL, 0);
+}
+
+static HOST_STORE_CHUNK_SIG(do_store_chunk) {
+  bool ok =
+      storage_file_set(&save_file, chunk_key, data, data_size) == STORAGE_OK;
+  game_api.game_chunk_stored(chunk_key, ok);
+}
+
+static HOST_LOAD_CHUNK_SIG(do_load_chunk) {
+  uint8_t buffer[1024 * 1024];
+  uint32_t size = sizeof(buffer);
+  if (storage_file_get(&save_file, chunk_key, buffer, &size) != STORAGE_OK) {
+    size = 0;
+  }
+  game_api.game_chunk_loaded(chunk_key, buffer, size);
+}
+
 // Load or reload the game library
 static bool load_game_api(GameAPI *api, const char *lib_path) {
   // Get current mtime
@@ -180,13 +255,24 @@ static bool load_game_api(GameAPI *api, const char *lib_path) {
   }
 
   // Load function pointers
-  api->game_init = (GameInitFunc)SDL_LoadFunction(api->lib_handle, "game_init");
-  api->game_frame =
-      (GameFrameFunc)SDL_LoadFunction(api->lib_handle, "game_frame");
-  api->game_render =
-      (GameRenderFunc)SDL_LoadFunction(api->lib_handle, "game_render");
+  api->game_set_host_functions = (GameSetHostFunctionsFn)SDL_LoadFunction(
+      api->lib_handle, TOSTRING(GAME_SET_HOST_FUNCTIONS_NAME));
+  api->game_get_memory_size = (GameGetMemorySizeFn)SDL_LoadFunction(
+      api->lib_handle, TOSTRING(GAME_GET_MEMORY_SIZE_NAME));
+  api->game_set_memory = (GameSetMemoryFn)SDL_LoadFunction(
+      api->lib_handle, TOSTRING(GAME_SET_MEMORY_NAME));
+  api->game_init =
+      (GameInitFn)SDL_LoadFunction(api->lib_handle, TOSTRING(GAME_INIT_NAME));
   api->game_input =
-      (GameInputFunc)SDL_LoadFunction(api->lib_handle, "game_input");
+      (GameInputFn)SDL_LoadFunction(api->lib_handle, TOSTRING(GAME_INPUT_NAME));
+  api->game_frame =
+      (GameFrameFn)SDL_LoadFunction(api->lib_handle, TOSTRING(GAME_FRAME_NAME));
+  api->game_render = (GameRenderFn)SDL_LoadFunction(api->lib_handle,
+                                                    TOSTRING(GAME_RENDER_NAME));
+  api->game_chunk_stored = (GameChunkStoredFn)SDL_LoadFunction(
+      api->lib_handle, TOSTRING(GAME_CHUNK_STORED_NAME));
+  api->game_chunk_loaded = (GameChunkLoadedFn)SDL_LoadFunction(
+      api->lib_handle, TOSTRING(GAME_CHUNK_LOADED_NAME));
 
   if (!api->game_init || !api->game_frame || !api->game_render ||
       !api->game_input) {
@@ -199,65 +285,50 @@ static bool load_game_api(GameAPI *api, const char *lib_path) {
   api->lib_mtime = path_info.modify_time;
   printf("Game library loaded successfully (mtime: %lld)\n",
          (long long)api->lib_mtime);
-  return true;
-}
 
-// Submit geometry - callback for RenderContext
-// Vertices are in the exact format compatible with SDL_Vertex
-static void submit_geometry(void *impl_data, const Vertex *vertices,
-                            int vertex_count) {
-  Renderer *r = (Renderer *)impl_data;
-
-  // Cast our Vertex format directly to SDL_Vertex
-  // They have identical layout by design
-  SDL_RenderGeometry(r->renderer, r->atlas_texture,
-                     (const SDL_Vertex *)vertices, vertex_count, NULL, 0);
-}
-
-static InputCommand map_key_to_command(SDL_Keycode key) {
-  switch (key) {
-  case SDLK_UP:
-  case SDLK_K:
-    return INPUT_CMD_UP;
-  case SDLK_DOWN:
-  case SDLK_J:
-    return INPUT_CMD_DOWN;
-  case SDLK_LEFT:
-  case SDLK_H:
-    return INPUT_CMD_LEFT;
-  case SDLK_RIGHT:
-  case SDLK_L:
-    return INPUT_CMD_RIGHT;
-  case SDLK_PERIOD:
-    return INPUT_CMD_PERIOD;
-  case SDLK_D:
-    return INPUT_CMD_D;
-  default:
-    return INPUT_CMD_NONE; // Invalid
+  bool needs_init = false;
+  size_t memory_size = api->game_get_memory_size();
+  if (memory_size != state_memory_size) {
+    state_memory = realloc(state_memory, memory_size);
+    state_memory_size = memory_size;
+    needs_init = true;
   }
+
+  game_api.game_set_host_functions(do_log, do_submit_geometry, do_load_chunk,
+                                   do_store_chunk);
+  game_api.game_set_memory(state_memory, state_memory_size);
+
+  if (needs_init) {
+    game_api.game_init(random_seed);
+  }
+
+  return true;
 }
 
 int main(int argc, char *argv[]) {
   (void)argc;
   (void)argv;
 
+  random_seed = SDL_rand_bits();
+
+  storage_file_run_tests();
+
+  if (storage_file_open(&save_file, "savegame.dat") != STORAGE_OK) {
+    return 1;
+  }
+
   // Load game library
-  GameAPI game_api = {0};
   const char *lib_path = "./libgame.so";
   if (!load_game_api(&game_api, lib_path)) {
     return 1;
   }
 
-  Renderer renderer = {
+  renderer = (Renderer){
       .scale = 2, // Default 2x scaling
   };
   if (!init_renderer(&renderer)) {
     return 1;
   }
-
-  // Initialize world
-  WorldState world = {0};
-  game_api.game_init(&world, SDL_rand_bits());
 
   bool running = true;
   SDL_Event event;
@@ -314,28 +385,9 @@ int main(int argc, char *argv[]) {
           break;
         }
 
-        // Scroll message log
-        if (event.key.key == SDLK_PAGEUP) {
-          renderer.message_scroll_offset++;
-          int max_scroll = (int)world.messages.count - MESSAGE_DISPLAY_LINES;
-          if (max_scroll < 0)
-            max_scroll = 0;
-          if (renderer.message_scroll_offset > max_scroll) {
-            renderer.message_scroll_offset = max_scroll;
-          }
-          break;
-        }
-        if (event.key.key == SDLK_PAGEDOWN) {
-          renderer.message_scroll_offset--;
-          if (renderer.message_scroll_offset < 0) {
-            renderer.message_scroll_offset = 0;
-          }
-          break;
-        }
-
         InputCommand cmd = map_key_to_command(event.key.key);
         if (cmd != INPUT_CMD_NONE) {
-          game_api.game_input(&world, cmd);
+          game_api.game_input(cmd);
         }
         break;
 
@@ -351,30 +403,23 @@ int main(int argc, char *argv[]) {
     double dt = (current_time - last_frame_time) /
                 1000000000.0; // Convert ns to seconds
     last_frame_time = current_time;
-    game_api.game_frame(&world, dt);
+    game_api.game_frame(dt);
 
     // Render
     // Clear to black
     SDL_SetRenderDrawColor(renderer.renderer, 0, 0, 0, 255);
     SDL_RenderClear(renderer.renderer);
 
-    // Set up render context
-    RenderContext ctx = {
-        .viewport_width_px = renderer.window_width,
-        .viewport_height_px = renderer.window_height,
-        .tile_size = renderer.scaled_tile_size,
-        .atlas_width_px = renderer.atlas_width,
-        .atlas_height_px = renderer.atlas_height,
-        .submit_geometry = submit_geometry,
-        .impl_data = &renderer,
-    };
-
     // Call game render
-    game_api.game_render(&world, &ctx);
+    game_api.game_render(renderer.window_width, renderer.window_height,
+                         renderer.scaled_tile_size, renderer.atlas_width,
+                         renderer.atlas_height);
 
     // Present
     SDL_RenderPresent(renderer.renderer);
   }
+
+  storage_file_close(&save_file);
 
   // Cleanup
   if (game_api.lib_handle) {

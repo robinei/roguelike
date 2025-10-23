@@ -1,6 +1,6 @@
 #pragma once
 
-#include <stdint.h>
+#include "common.h"
 
 // ============================================================================
 // Tile constants - combined atlas layout
@@ -22,24 +22,6 @@ typedef enum {
 } TileType;
 
 // ============================================================================
-// Vertex format (compatible with SDL_Vertex)
-// ============================================================================
-
-// Vertex format compatible with SDL_Vertex
-// This exact layout matches SDL_Vertex so hosts can cast directly
-typedef struct {
-  float position[2];  // Screen position in pixels (x, y)
-  float color[4];     // Vertex color (r, g, b, a) in 0-1 range
-  float tex_coord[2]; // Texture coordinates (u, v) in 0-1 range
-} Vertex;
-
-typedef struct {
-  uint8_t r, g, b, a;
-} Color;
-
-#define MAX_VERTICES 4096
-
-// ============================================================================
 // Platform context - host services available to the game
 // ============================================================================
 
@@ -52,26 +34,13 @@ typedef struct {
   // Atlas dimensions for calculating texture coordinates
   int atlas_width_px;
   int atlas_height_px;
-
-  // Rendering callback - submits vertices for drawing
-  // Vertices form triangles (every 3 vertices = 1 triangle)
-  // The combined texture atlas is implicitly bound
-  // Buffer can be reused immediately after this returns
-  void (*submit_geometry)(void *impl_data, const Vertex *vertices,
-                          int vertex_count);
-
-  // Future host services can be added here:
-  // void (*play_sound)(void *impl_data, SoundId sound);
-  // void (*log_message)(void *impl_data, const char *msg);
-  // void (*save_data)(void *impl_data, const void *data, int size);
-
-  // Implementation-specific data (SDL renderer, textures, JS context, etc.)
-  void *impl_data;
 } RenderContext;
 
 // ============================================================================
 // Geometry builder - builds vertex buffers for rendering
 // ============================================================================
+
+#define MAX_VERTICES 4096
 
 typedef struct {
   Vertex vertices[MAX_VERTICES];

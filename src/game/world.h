@@ -6,25 +6,9 @@
 #include "particles.h"
 #include "parts.h"
 #include "turn_queue.h"
+#include "utils/bbuf.h"
 
 #define TURN_INTERVAL 100
-
-// ============================================================================
-// Input commands
-// ============================================================================
-
-typedef enum {
-  INPUT_CMD_NONE,
-
-  INPUT_CMD_UP,
-  INPUT_CMD_RIGHT,
-  INPUT_CMD_DOWN,
-  INPUT_CMD_LEFT,
-
-  INPUT_CMD_PERIOD,
-  INPUT_CMD_R,
-  INPUT_CMD_D,
-} InputCommand;
 
 // ============================================================================
 // Visible message log
@@ -139,6 +123,26 @@ extern WorldState *active_world;
 #define BITS(part) WORLD.parts.part##Bitset[_word_idx]
 
 // ============================================================================
+// Bitset utilities (operate on ENTITY_BITSET_WORDS-sized bitsets)
+// ============================================================================
+
+static inline void bitset_set(uint64_t *bitset, EntityIndex index) {
+  bitset[index / 64] |= (1ULL << (index % 64));
+}
+
+static inline void bitset_clear(uint64_t *bitset, EntityIndex index) {
+  bitset[index / 64] &= ~(1ULL << (index % 64));
+}
+
+static inline bool bitset_test(const uint64_t *bitset, EntityIndex index) {
+  return (bitset[index / 64] >> (index % 64)) & 1;
+}
+
+static inline void bitset_copy(uint64_t *dst, const uint64_t *src) {
+  memcpy(dst, src, ENTITY_BITSET_WORDS * sizeof(uint64_t));
+}
+
+// ============================================================================
 // Part management utils
 // ============================================================================
 
@@ -193,7 +197,7 @@ typedef struct {
   // adding the index to the entities array. the redundancy makes both testing
   // membership and iterating fast
   uint32_t count;
-  uint64_t bitset[BITSET_WORDS];
+  uint64_t bitset[ENTITY_BITSET_WORDS];
   EntityIndex entities[MAX_ENTITIES];
 } EntitySet;
 
@@ -224,6 +228,9 @@ void entityset_free(EntitySet *to_free);
 
 EntityIndex entity_alloc(void);
 void entity_free(EntityIndex index);
+
+void entity_pack(EntityIndex entity, ByteBuffer *buf);
+EntityIndex entity_unpack(ByteBuffer *buf);
 
 bool entity_is_player(EntityIndex index);
 bool entity_is_alive(EntityHandle index);

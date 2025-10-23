@@ -1,7 +1,6 @@
 #pragma once
 
 #include "common.h"
-#include <stdbool.h>
 
 typedef struct {
   uint32_t passable : 1;
@@ -33,3 +32,5 @@ typedef struct {
 bool map_get_random_passable(Map *map, int region_x, int region_y,
                              int region_width, int region_height,
                              Position *out_pos, int max_attempts);
+
+void ensure_chunks_around_position(int player_x, int player_y);
