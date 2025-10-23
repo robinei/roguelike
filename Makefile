@@ -27,6 +27,7 @@ WASM_TARGET = $(BUILDDIR)/game.wasm
 # ============================================================================
 # SDL3 host executable (native desktop)
 # ============================================================================
+HOSTBIN_CFLAGS = $(CFLAGS)
 HOSTBIN_LDFLAGS = -lm -lSDL3
 HOSTBIN_SRCS = $(shell find src/sdl3_host -name '*.c')
 HOSTBIN_OBJS = $(HOSTBIN_SRCS:%.c=$(BUILDDIR)/%.o)
@@ -88,7 +89,7 @@ $(BUILDDIR)/src/game/%.o: src/game/%.c | $(BUILDDIR)
 # Compile host source files
 $(BUILDDIR)/src/sdl3_host/%.o: src/sdl3_host/%.c | $(BUILDDIR)
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -c $< -o $@
+	$(CC) $(HOSTBIN_CFLAGS) -c $< -o $@
 
 # ============================================================================
 # WASM build rules

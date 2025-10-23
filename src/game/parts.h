@@ -105,6 +105,10 @@ typedef struct {
   uint16_t queue_index;
 } TurnSchedule;
 
+// ============================================================================
+// Part lists as X-macros (parts have data, and marks are dataless parts)
+// ============================================================================
+
 #define FOREACH_PART(PART)                                                     \
   PART(Identity, EntityIdentity)                                               \
   PART(Parent, EntityIndex)                                                    \
@@ -123,7 +127,11 @@ typedef struct {
   MARK(IsInventory)                                                            \
   MARK(IsDead)
 
-#define DO_DECLARE_BITSET(name) uint64_t name##Bitset[BITSET_WORDS];
+// ============================================================================
+// PartState struct
+// ============================================================================
+
+#define DO_DECLARE_BITSET(name) uint64_t name##Bitset[ENTITY_BITSET_WORDS];
 #define DO_DECLARE_PART(name, type)                                            \
   DO_DECLARE_BITSET(name)                                                      \
   type name[MAX_ENTITIES];
@@ -135,3 +143,40 @@ typedef struct {
 
 #undef DO_DECLARE_BITSET
 #undef DO_DECLARE_PART
+
+// ============================================================================
+// Part type enum
+// ============================================================================
+
+#define DO_DECLARE_MARK_ENUM(name) PART_TYPE_##name,
+#define DO_DECLARE_PART_ENUM(name, type) PART_TYPE_##name,
+
+typedef enum {
+  FOREACH_MARK(DO_DECLARE_MARK_ENUM) FOREACH_PART(DO_DECLARE_PART_ENUM)
+      PART_TYPE_MAX
+} PartType;
+
+#undef DO_DECLARE_MARK_ENUM
+#undef DO_DECLARE_PART_ENUM
+
+// ============================================================================
+// Part bitset (for storing a combination of part bits)
+// ============================================================================
+
+#define PART_BITSET_WORDS ((PART_TYPE_MAX + 63) / 64)
+
+typedef struct {
+  uint64_t words[PART_BITSET_WORDS];
+} PartBitset;
+
+static inline void part_bitset_add(PartBitset *bitset, PartType type) {
+  bitset->words[type / 64] |= (1ULL << (type % 64));
+}
+
+static inline void part_bitset_remove(PartBitset *bitset, PartType type) {
+  bitset->words[type / 64] &= ~(1ULL << (type % 64));
+}
+
+static inline bool part_bitset_test(PartBitset *bitset, PartType type) {
+  return (bitset->words[type / 64] & (1ULL << (type % 64))) != 0;
+}

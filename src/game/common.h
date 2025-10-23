@@ -1,11 +1,14 @@
 #pragma once
 
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
+#include "api.h" // IWYU pragma: keep
+
+// ============================================================================
+// "Runtime" support
+// ============================================================================
+
+#ifdef __wasm__
 
 // For freestanding WASM builds, use compiler builtins instead of libc
-#ifdef __wasm__
 #define sqrtf __builtin_sqrt
 #define sqrt __builtin_sqrt
 #define sinf __builtin_sin
@@ -17,36 +20,28 @@
 #define memcpy __builtin_memcpy
 #define memset __builtin_memset
 
-// Log levels matching JavaScript console
-typedef enum {
-  LOG_DEBUG = 0,
-  LOG_LOG = 1,
-  LOG_INFO = 2,
-  LOG_WARN = 3,
-  LOG_ERROR = 4,
-} LogLevel;
-
-// Logging support - imported from JavaScript
-extern void js_log(LogLevel level, const char *message);
-
-// Helper macros for stringification
-#define STRINGIFY(x) #x
-#define TOSTRING(x) STRINGIFY(x)
-
 // Simple assert for WASM builds - log file:line and trap on failure
 #define assert(x)                                                              \
   do {                                                                         \
     if (!(x)) {                                                                \
-      js_log(LOG_ERROR,                                                        \
-             __FILE__ ":" TOSTRING(__LINE__) ": Assertion failed: " #x);       \
+      host_log(LOG_ERROR,                                                      \
+               __FILE__ ":" TOSTRING(__LINE__) ": Assertion failed: " #x);     \
       __builtin_trap();                                                        \
     }                                                                          \
   } while (0)
+
 #else
-#include <assert.h>
-#include <math.h>
-#include <string.h>
+
+// when compiled for native we use libc for the following (only):
+#include <assert.h> // IWYU pragma: keep
+#include <math.h>   // IWYU pragma: keep
+#include <string.h> // IWYU pragma: keep
+
 #endif
+
+// ============================================================================
+// Common utilities
+// ============================================================================
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -92,8 +87,8 @@ void output_message(const char *fmt, ...);
 
 // exposed here so you don't have to know about Map to declare buffers which
 // correspond to what is used for Map
-#define MAP_CHUNK_WIDTH 84
-#define MAP_CHUNK_HEIGHT 84
+#define MAP_CHUNK_WIDTH 16
+#define MAP_CHUNK_HEIGHT 16
 #define MAP_CHUNK_WINDOW_X 3
 #define MAP_CHUNK_WINDOW_Y 3
 #define MAP_CHUNK_TOTAL_X 100
@@ -106,6 +101,7 @@ void output_message(const char *fmt, ...);
 // ============================================================================
 
 #define MAX_ENTITIES 4096
+#define ENTITY_BITSET_WORDS (MAX_ENTITIES / 64)
 
 typedef uint16_t EntityIndex;
 
@@ -119,8 +115,12 @@ static inline bool entity_handle_equals(EntityHandle a, EntityHandle b) {
 }
 
 // ============================================================================
-// Position + Direction
+// Common types
 // ============================================================================
+
+typedef struct {
+  uint8_t r, g, b, a;
+} Color;
 
 typedef struct {
   uint16_t x;
@@ -178,26 +178,4 @@ static inline Direction dir_opposite(Direction dir) {
   default:
     return DIR_N;
   }
-}
-
-// ============================================================================
-// Bitset utilities (operate on BITSET_WORDS-sized bitsets)
-// ============================================================================
-
-#define BITSET_WORDS (MAX_ENTITIES / 64)
-
-static inline void bitset_set(uint64_t *bitset, EntityIndex index) {
-  bitset[index / 64] |= (1ULL << (index % 64));
-}
-
-static inline void bitset_clear(uint64_t *bitset, EntityIndex index) {
-  bitset[index / 64] &= ~(1ULL << (index % 64));
-}
-
-static inline bool bitset_test(const uint64_t *bitset, EntityIndex index) {
-  return (bitset[index / 64] >> (index % 64)) & 1;
-}
-
-static inline void bitset_copy(uint64_t *dst, const uint64_t *src) {
-  memcpy(dst, src, BITSET_WORDS * sizeof(uint64_t));
 }

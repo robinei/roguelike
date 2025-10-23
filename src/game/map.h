@@ -1,7 +1,6 @@
 #pragma once
 
 #include "common.h"
-#include <stdbool.h>
 
 typedef struct {
   uint32_t passable : 1;
@@ -17,8 +16,14 @@ typedef struct {
   uint8_t water_depth[MAP_WIDTH_MAX * MAP_HEIGHT_MAX];
 } Map;
 
+typedef enum {
+  CHUNK_UNLOADED,  // Not loaded, not loading
+  CHUNK_LOADING,   // Load request sent, waiting for callback
+  CHUNK_LOADED,    // Data present and ready
+} ChunkState;
+
 typedef struct {
-  bool generated;
+  ChunkState state;
 } MapChunk;
 
 typedef struct {
@@ -33,3 +38,10 @@ typedef struct {
 bool map_get_random_passable(Map *map, int region_x, int region_y,
                              int region_width, int region_height,
                              Position *out_pos, int max_attempts);
+
+void ensure_chunks_around_position(int player_x, int player_y);
+
+// Chunk serialization (called from game callbacks)
+void deserialize_chunk(int chunk_x, int chunk_y, const void *data,
+                       size_t data_size);
+void generate_chunk(int chunk_x, int chunk_y);

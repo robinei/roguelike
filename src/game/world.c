@@ -1,5 +1,7 @@
 #include "world.h"
 #include "common.h"
+#include "events/events.h"
+#include "parts.h"
 
 #define PRNF_SUPPORT_FLOAT
 #define PRNF_SUPPORT_DOUBLE
@@ -8,7 +10,7 @@
 #define PRNF_FLOAT_PREC_DEFAULT 3
 #define PRNF_COL_ALIGNMENT
 #define PRNF_IMPLEMENTATION
-#include "prnf.h"
+#include "utils/prnf.h"
 
 // declare global WorldState pointer
 WorldState *active_world;
@@ -48,7 +50,7 @@ void entityset_add(EntitySet *set, EntityIndex index) {
 
 void entityset_expand_descendants(EntitySet *set) {
   // Track visited entities to avoid redundant parent chain walks
-  uint64_t visited[BITSET_WORDS];
+  uint64_t visited[ENTITY_BITSET_WORDS];
 
   // Pre-populate visited with entities already in the set
   bitset_copy(visited, set->bitset);
@@ -105,10 +107,7 @@ void entityset_free(EntitySet *to_free) {
   for (uint32_t i = 0; i < to_free->count; i++) {
     EntityIndex index = to_free->entities[i];
 
-    // Remove from turn queue if present
-    if (HAS_PART(TurnSchedule, index)) {
-      turn_queue_remove(index);
-    }
+    on_entity_free(index);
 
 #define DO_CLEAR_PART_BIT(name, type) DISABLE_PART(name, index);
 #define DO_CLEAR_MARK_BIT(name) DISABLE_PART(name, index);
@@ -173,4 +172,65 @@ EntityIndex get_attributes_ancestor(EntityIndex entity) {
     }
     entity = PART(Parent, entity);
   }
+}
+
+void entity_pack(EntityIndex entity, ByteBuffer *buf) {
+  on_entity_pack(entity);
+
+  PartBitset part_bitset = {0};
+  uint8_t *part_bitset_ptr = buf->data + buf->size;
+
+  // initially write empty bitset to buffer
+  bbuf_pack_bytes(buf, &part_bitset, sizeof(part_bitset), "part_bitset");
+
+#define DO_PACK_MARK(name)                                                     \
+  if (HAS_PART(name, entity)) {                                                \
+    part_bitset_add(&part_bitset, PART_TYPE_##name);                           \
+  }
+
+#define DO_PACK_PART(name, type)                                               \
+  if (HAS_PART(name, entity)) {                                                \
+    part_bitset_add(&part_bitset, PART_TYPE_##name);                           \
+    bbuf_pack_bytes(buf, &PART(name, entity), sizeof(PART(name, entity)),      \
+                    "part_" #name);                                            \
+  }
+
+  FOREACH_MARK(DO_PACK_MARK)
+  FOREACH_PART(DO_PACK_PART)
+
+#undef DO_SET_MARK_BIT
+#undef DO_PACK_PART
+
+  assert(buf->size <= buf->capacity);
+
+  // go back and overwrite empty bitset in buffer
+  memcpy(part_bitset_ptr, &part_bitset, sizeof(part_bitset));
+}
+
+EntityIndex entity_unpack(ByteBuffer *buf) {
+  EntityIndex entity = entity_alloc();
+
+  PartBitset part_bitset;
+  bbuf_unpack_bytes(buf, &part_bitset, sizeof(part_bitset), "part_bitset");
+
+#define DU_UNPACK_MARK(name)                                                   \
+  if (part_bitset_test(&part_bitset, PART_TYPE_##name)) {                      \
+    ENABLE_PART(name, entity);                                                 \
+  }
+
+#define DU_UNPACK_PART(name, type)                                             \
+  if (part_bitset_test(&part_bitset, PART_TYPE_##name)) {                      \
+    ENABLE_PART(name, entity);                                                 \
+    bbuf_unpack_bytes(buf, &PART(name, entity), sizeof(type), "part_" #name);  \
+  }
+
+  FOREACH_MARK(DU_UNPACK_MARK)
+  FOREACH_PART(DU_UNPACK_PART)
+
+#undef DO_SET_MARK_BIT
+#undef DU_UNPACK_PART
+
+  on_entity_unpacked(entity);
+
+  return entity;
 }

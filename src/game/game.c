@@ -1,185 +1,95 @@
-#include "game.h"
 #include "actions/actions.h"
 #include "ai/ai.h"
 #include "ai/astar.h"
+#include "api.h"
 #include "common.h"
 #include "flood.h"
 #include "fov.h"
 #include "map.h"
-#include "mapgen/mapgen.h"
 #include "particles.h"
 #include "parts.h"
-#include "prnf.h"
 #include "random.h"
 #include "render_api.h"
 #include "turn_queue.h"
+#include "utils/prnf.h"
 #include "world.h"
 
-// Generate a single chunk with boundary constraints from neighbors
-// chunk_x, chunk_y are local window coordinates (0-2)
-static void generate_chunk(int chunk_x, int chunk_y) {
-  assert(chunk_x >= 0 && chunk_x < MAP_CHUNK_WINDOW_X);
-  assert(chunk_y >= 0 && chunk_y < MAP_CHUNK_WINDOW_Y);
+#ifdef __wasm__
 
-  // Calculate world chunk coordinates
-  int world_chunk_x = WORLD.worldmap.curr_chunk_x + (chunk_x - 1);
-  int world_chunk_y = WORLD.worldmap.curr_chunk_y + (chunk_y - 1);
-  assert(world_chunk_x >= 0 && world_chunk_x < MAP_CHUNK_TOTAL_X);
-  assert(world_chunk_y >= 0 && world_chunk_y < MAP_CHUNK_TOTAL_X);
+extern unsigned char __heap_base;
+extern unsigned char __data_end;
+extern unsigned char __stack_pointer;
+
+unsigned char *get_heap_base(void) { return &__heap_base; }
+
+#else
+
+HostLogFn host_log;
+HostSubmitGeometryFn host_submit_geometry;
+HostLoadChunkFn host_load_chunk;
+HostStoreChunkFn host_store_chunk;
+
+GAME_SET_HOST_FUNCTIONS_SIG(GAME_SET_HOST_FUNCTIONS_NAME) {
+  host_log = host_log_fn;
+  host_submit_geometry = host_submit_geometry_fn;
+  host_load_chunk = host_load_chunk_fn;
+  host_store_chunk = host_store_chunk_fn;
+}
+
+#endif
+
+GAME_GET_MEMORY_SIZE_SIG(GAME_GET_MEMORY_SIZE_NAME) {
+  return sizeof(WorldState);
+}
+
+GAME_SET_MEMORY_SIG(GAME_SET_MEMORY_NAME) {
+  assert(size >= sizeof(WorldState));
+  active_world = (WorldState *)buf;
+}
+
+GAME_CHUNK_LOADED_SIG(GAME_CHUNK_LOADED_NAME) {
+  // Unpack chunk coordinates from key
+  int32_t world_chunk_x = (int32_t)(chunk_key & 0xFFFFFFFF);
+  int32_t world_chunk_y = (int32_t)(chunk_key >> 32);
+
+  // Calculate local chunk coordinates (0-2 in the 3x3 window)
+  int chunk_x = world_chunk_x - WORLD.worldmap.curr_chunk_x + 1;
+  int chunk_y = world_chunk_y - WORLD.worldmap.curr_chunk_y + 1;
+
+  // Validate chunk is still in the window (might have moved)
+  if (chunk_x < 0 || chunk_x >= MAP_CHUNK_WINDOW_X || chunk_y < 0 ||
+      chunk_y >= MAP_CHUNK_WINDOW_Y) {
+    // Chunk is no longer in view, ignore this load
+    return;
+  }
 
   int world_chunk_idx = world_chunk_y * MAP_CHUNK_TOTAL_X + world_chunk_x;
-  if (WORLD.worldmap.chunks[world_chunk_idx].generated) {
-    return; // Already generated
-  }
 
-  output_message("Generate %d, %d", world_chunk_x, world_chunk_y);
-  CSPGenParams csp_params = {
-      .iterations = 100000,
-      .attempts_per_tile = 5,
-  };
-
-  int region_x = chunk_x * MAP_CHUNK_WIDTH;
-  int region_y = chunk_y * MAP_CHUNK_HEIGHT;
-
-  mapgen_csp_region(&WORLD.map, region_x, region_y, MAP_CHUNK_WIDTH,
-                    MAP_CHUNK_HEIGHT, &csp_params);
-
-  WORLD.worldmap.chunks[world_chunk_idx].generated = true;
-}
-
-// Shift the map window by (dx, dy) chunks when player crosses chunk boundary
-// Uses in-place shifting: iterate in the right direction to avoid overwriting
-static void shift_map_window(int dx, int dy) {
-  output_message("shift_map_window called: dx=%d, dy=%d", dx, dy);
-
-  // Mark outgoing chunks as not generated (so they can be regenerated later)
-  for (int cy = 0; cy < MAP_CHUNK_WINDOW_Y; cy++) {
-    for (int cx = 0; cx < MAP_CHUNK_WINDOW_X; cx++) {
-      // Calculate where this chunk will end up after the shift
-      // Note: chunks shift opposite to player movement direction
-      int dest_cx = cx - dx;
-      int dest_cy = cy - dy;
-
-      // If it shifts out of the window, mark as not generated in world map
-      if (dest_cx < 0 || dest_cx >= MAP_CHUNK_WINDOW_X || dest_cy < 0 ||
-          dest_cy >= MAP_CHUNK_WINDOW_Y) {
-        // Calculate world chunk coordinates (before the shift)
-        int world_chunk_x = WORLD.worldmap.curr_chunk_x + (cx - 1);
-        int world_chunk_y = WORLD.worldmap.curr_chunk_y + (cy - 1);
-
-        if (world_chunk_x >= 0 && world_chunk_x < MAP_CHUNK_TOTAL_X &&
-            world_chunk_y >= 0 && world_chunk_y < MAP_CHUNK_TOTAL_Y) {
-          int world_chunk_idx =
-              world_chunk_y * MAP_CHUNK_TOTAL_X + world_chunk_x;
-          WORLD.worldmap.chunks[world_chunk_idx].generated = false;
-        }
-      }
-    }
-  }
-
-  // Calculate shift in tiles
-  int shift_x = -dx * MAP_CHUNK_WIDTH;
-  int shift_y = -dy * MAP_CHUNK_HEIGHT;
-
-  // Determine iteration direction to avoid overwriting source data
-  int y_start = (shift_y > 0) ? MAP_HEIGHT_MAX - 1 : 0;
-  int y_end = (shift_y > 0) ? -1 : MAP_HEIGHT_MAX;
-  int y_step = (shift_y > 0) ? -1 : 1;
-
-  int x_start = (shift_x > 0) ? MAP_WIDTH_MAX - 1 : 0;
-  int x_end = (shift_x > 0) ? -1 : MAP_WIDTH_MAX;
-  int x_step = (shift_x > 0) ? -1 : 1;
-
-  // Shift map data in-place
-  for (int y = y_start; y != y_end; y += y_step) {
-    for (int x = x_start; x != x_end; x += x_step) {
-      int src_x = x - shift_x;
-      int src_y = y - shift_y;
-
-      // Check if both source AND destination are within bounds
-      if (x >= 0 && x < MAP_WIDTH_MAX && y >= 0 && y < MAP_HEIGHT_MAX &&
-          src_x >= 0 && src_x < MAP_WIDTH_MAX && src_y >= 0 &&
-          src_y < MAP_HEIGHT_MAX) {
-        // Copy from old position
-        WORLD.map.cells[y * MAP_WIDTH_MAX + x] =
-            WORLD.map.cells[src_y * MAP_WIDTH_MAX + src_x];
-        WORLD.map.water_depth[y * MAP_WIDTH_MAX + x] =
-            WORLD.map.water_depth[src_y * MAP_WIDTH_MAX + src_x];
-      } else if (x >= 0 && x < MAP_WIDTH_MAX && y >= 0 && y < MAP_HEIGHT_MAX) {
-        // Destination in bounds, source out of bounds - initialize to default
-        WORLD.map.cells[y * MAP_WIDTH_MAX + x] = (MapCell){
-            .passable = 1,
-            .visible = 0,
-            .tile = TILE_NONE,
-            .category = 0,
-        };
-        WORLD.map.water_depth[y * MAP_WIDTH_MAX + x] = 0;
-      }
-    }
-  }
-
-  // Shift all entity positions and remove entities that are now outside bounds
-  WORLD_QUERY(i, BITS(Position)) {
-    Position *pos = &PART(Position, i);
-    pos->x += shift_x;
-    pos->y += shift_y;
-
-    // Check if entity is now outside the map bounds
-    if (pos->x < 0 || pos->x >= MAP_WIDTH_MAX || pos->y < 0 ||
-        pos->y >= MAP_HEIGHT_MAX) {
-      // Entity has been shifted out of the active window
-      // Don't despawn the player! Just clamp their position
-      if (entity_is_player(i)) {
-        if (pos->x < 0)
-          pos->x = 0;
-        if (pos->x >= MAP_WIDTH_MAX)
-          pos->x = MAP_WIDTH_MAX - 1;
-        if (pos->y < 0)
-          pos->y = 0;
-        if (pos->y >= MAP_HEIGHT_MAX)
-          pos->y = MAP_HEIGHT_MAX - 1;
-      } else {
-        // Remove non-player entities that are out of bounds
-        entity_free(i);
-      }
-    }
+  if (data_size > 0 && data != NULL) {
+    // Chunk found in storage, deserialize it
+    output_message("Loaded chunk (%d, %d) from storage", world_chunk_x,
+                   world_chunk_y);
+    deserialize_chunk(chunk_x, chunk_y, data, data_size);
+    WORLD.worldmap.chunks[world_chunk_idx].state = CHUNK_LOADED;
+  } else {
+    // Chunk not found in storage, generate it fresh
+    // generate_chunk will mark as CHUNK_LOADED and log message
+    output_message("Failed to load chunk (%d, %d) from storage; falling back "
+                   "to generation",
+                   world_chunk_x, world_chunk_y);
+    WORLD.worldmap.chunks[world_chunk_idx].state = CHUNK_UNLOADED;
+    generate_chunk(chunk_x, chunk_y);
   }
 }
 
-// Check if player entered a new chunk and generate neighbors if needed
-void ensure_chunks_around_position(int player_x, int player_y) {
-  // Calculate which chunk the player is in (within the 3x3 window)
-  int player_chunk_x = player_x / MAP_CHUNK_WIDTH;  // 0, 1, or 2
-  int player_chunk_y = player_y / MAP_CHUNK_HEIGHT; // 0, 1, or 2
-  assert(player_chunk_x >= 0 && player_chunk_x <= 2);
-  assert(player_chunk_y >= 0 && player_chunk_y <= 2);
+GAME_CHUNK_STORED_SIG(GAME_CHUNK_STORED_NAME) {
+  (void)chunk_key;
 
-  // Calculate offset from center chunk
-  int dx = player_chunk_x - 1; // -1, 0, or +1
-  int dy = player_chunk_y - 1; // -1, 0, or +1
-  assert(dx * dx <= 1);
-  assert(dy * dy <= 1);
-
-  if (dx != 0 || dy != 0) {
-    // Player crossed chunk boundary - shift the window
-    shift_map_window(dx, dy);
-
-    // Update world chunk coordinates
-    WORLD.worldmap.curr_chunk_x += dx;
-    WORLD.worldmap.curr_chunk_y += dy;
+  if (!ok) {
+    // Storage failed - log error but continue
+    // In a real game, might want to retry or warn the player
+    output_message("Warning: Failed to save chunk");
   }
-
-  // Generate only the chunk the player is standing on (center chunk)
-  // Later we will make this ensure the 3x3 around the player is generated,
-  // but for now only the single chunk so we can see them being generated
-  // as the player walks onto them
-  for (int chunk_y = 0; chunk_y < MAP_CHUNK_WINDOW_Y; chunk_y++) {
-    for (int chunk_x = 0; chunk_x < MAP_CHUNK_WINDOW_X; chunk_x++) {
-      generate_chunk(chunk_x, chunk_y);
-    }
-  }
-
-  output_message("ensure_chunks_around_position end");
 }
 
 // ========================================================================
@@ -243,9 +153,8 @@ static EntityIndex spawn_monster(void) {
   return monster;
 }
 
-void game_init(WorldState *world, uint64_t rng_seed) {
-  active_world = world;
-  world->rng_state = rng_seed;
+GAME_INIT_SIG(GAME_INIT_NAME) {
+  WORLD.rng_state = rng_seed;
 
   // entity at index 0 should not be used (index 0 means "no entity")
   entity_alloc();
@@ -270,10 +179,6 @@ void game_init(WorldState *world, uint64_t rng_seed) {
     }
   }
 
-  // Generate only the center chunk initially
-  // Other chunks will be generated on-demand when player approaches
-  generate_chunk(1, 1); // Center chunk (middle of 3x3 grid)
-
   // Spawn player and monsters in random passable positions
   ENTITIES.player = entity_handle_from_index(spawn_player());
 
@@ -283,17 +188,16 @@ void game_init(WorldState *world, uint64_t rng_seed) {
   spawn_monster();
 #endif
 
-  // Compute initial FOV for player
+  // Force terrain generation and initial FOV calculation
   on_player_moved();
 }
 
-static void game_tick(WorldState *world, uint64_t tick) {
-  active_world = world;
+static void game_tick(uint64_t tick) {
   (void)tick;
   particle_emit_system_tick();
 
   // Run flood simulation
-  flood_simulate_step(&world->map);
+  flood_simulate_step(&WORLD.map);
 }
 
 static void process_turn_entity(void) {
@@ -345,9 +249,7 @@ static void process_npc_turn(EntityIndex entity) {
   action_move(entity, random64() % 8);
 }
 
-void game_frame(WorldState *world, double dt) {
-  active_world = world;
-
+GAME_FRAME_SIG(GAME_FRAME_NAME) {
   // FPS calculation (update every second)
   WORLD.frame_time_accumulator += dt;
   WORLD.frame_count++;
@@ -361,7 +263,7 @@ void game_frame(WorldState *world, double dt) {
   WORLD.tick_accumulator += dt;
   const double TICK_INTERVAL = 0.1; // 100ms = 10Hz
   while (WORLD.tick_accumulator >= TICK_INTERVAL) {
-    game_tick(world, WORLD.tick_counter++);
+    game_tick(WORLD.tick_counter++);
     WORLD.tick_accumulator -= TICK_INTERVAL;
   }
 
@@ -414,13 +316,7 @@ void game_frame(WorldState *world, double dt) {
   }
 }
 
-void game_input(WorldState *world, InputCommand command) {
-  active_world = world;
-
-  if (WORLD.next_player_input == INPUT_CMD_NONE) {
-    output_message("input: %d", command);
-  }
-
+GAME_INPUT_SIG(GAME_INPUT_NAME) {
   // Just record the input - game_frame will process it
   WORLD.next_player_input = command;
 }
@@ -530,12 +426,18 @@ static uint8_t calc_corner_light(Map *map, int tile_x, int tile_y, int corner_x,
   return (uint8_t)((min + avg * 3) / 4);
 }
 
-void game_render(WorldState *world, RenderContext *ctx) {
-  active_world = world;
+GAME_RENDER_SIG(GAME_RENDER_NAME) {
+  RenderContext ctx = {
+      .viewport_width_px = viewport_width_px,
+      .viewport_height_px = viewport_height_px,
+      .tile_size = tile_size,
+      .atlas_width_px = atlas_width_px,
+      .atlas_height_px = atlas_height_px,
+  };
 
   // Use static to avoid stack overflow (GeometryBuilder is ~128KB)
   static GeometryBuilder geom;
-  geobuilder_init(&geom, ctx);
+  geobuilder_init(&geom, &ctx);
 
   // Get player position for camera centering
   EntityIndex player_idx = entity_handle_to_index(ENTITIES.player);
@@ -564,18 +466,18 @@ void game_render(WorldState *world, RenderContext *ctx) {
 
   // Calculate camera position in pixels (center on player's interpolated
   // position)
-  float camera_center_px = camera_center_x * ctx->tile_size;
-  float camera_center_py = camera_center_y * ctx->tile_size;
+  float camera_center_px = camera_center_x * tile_size;
+  float camera_center_py = camera_center_y * tile_size;
 
   // Calculate top-left corner of viewport in pixels
-  float viewport_left_px = camera_center_px - ctx->viewport_width_px / 2.0f;
-  float viewport_top_px = camera_center_py - ctx->viewport_height_px / 2.0f;
+  float viewport_left_px = camera_center_px - viewport_width_px / 2.0f;
+  float viewport_top_px = camera_center_py - viewport_height_px / 2.0f;
 
   // Calculate top-left tile and pixel offset
-  int start_tile_x = (int)(viewport_left_px / ctx->tile_size);
-  int start_tile_y = (int)(viewport_top_px / ctx->tile_size);
-  int offset_x = (int)(viewport_left_px - start_tile_x * ctx->tile_size);
-  int offset_y = (int)(viewport_top_px - start_tile_y * ctx->tile_size);
+  int start_tile_x = (int)(viewport_left_px / tile_size);
+  int start_tile_y = (int)(viewport_top_px / tile_size);
+  int offset_x = (int)(viewport_left_px - start_tile_x * tile_size);
+  int offset_y = (int)(viewport_top_px - start_tile_y * tile_size);
 
   // Calculate chaotic torch flicker using combined non-linear waves
   float t = WORLD.particles.time;
@@ -589,21 +491,19 @@ void game_render(WorldState *world, RenderContext *ctx) {
 
   // Draw visible tiles
   int screen_y = -offset_y;
-  for (int tile_y = start_tile_y; screen_y < ctx->viewport_height_px;
-       tile_y++) {
+  for (int tile_y = start_tile_y; screen_y < viewport_height_px; tile_y++) {
     int screen_x = -offset_x;
-    for (int tile_x = start_tile_x; screen_x < ctx->viewport_width_px;
-         tile_x++) {
+    for (int tile_x = start_tile_x; screen_x < viewport_width_px; tile_x++) {
       // Check if tile is within map bounds
-      if (tile_x >= 0 && tile_x < (int)world->map.width && tile_y >= 0 &&
-          tile_y < (int)world->map.height) {
+      if (tile_x >= 0 && tile_x < (int)WORLD.map.width && tile_y >= 0 &&
+          tile_y < (int)WORLD.map.height) {
 
-        int tile = world->map.cells[tile_y * MAP_WIDTH_MAX + tile_x].tile;
+        int tile = WORLD.map.cells[tile_y * MAP_WIDTH_MAX + tile_x].tile;
         geobuilder_tile(&geom, tile, screen_x, screen_y);
       }
-      screen_x += ctx->tile_size;
+      screen_x += tile_size;
     }
-    screen_y += ctx->tile_size;
+    screen_y += tile_size;
   }
 
   // Draw entities with position
@@ -653,8 +553,8 @@ void game_render(WorldState *world, RenderContext *ctx) {
     }
 
     // Convert world position to pixels, then to screen coordinates
-    float world_px = world_x * ctx->tile_size;
-    float world_py = world_y * ctx->tile_size;
+    float world_px = world_x * tile_size;
+    float world_py = world_y * tile_size;
     int screen_x = (int)(world_px - viewport_left_px);
     int screen_y = (int)(world_py - viewport_top_px);
 
@@ -699,8 +599,8 @@ void game_render(WorldState *world, RenderContext *ctx) {
       py += dir_dy(path_test[i]);
 
       // Convert to screen coordinates
-      float world_px = px * ctx->tile_size;
-      float world_py = py * ctx->tile_size;
+      float world_px = px * tile_size;
+      float world_py = py * tile_size;
       int scr_x = (int)(world_px - viewport_left_px);
       int scr_y = (int)(world_py - viewport_top_px);
 
@@ -717,29 +617,27 @@ void game_render(WorldState *world, RenderContext *ctx) {
   // Draw interpolated torch lighting (actually draw the darkness), and water
   // overlays
   screen_y = -offset_y;
-  for (int tile_y = start_tile_y; screen_y < ctx->viewport_height_px;
-       tile_y++) {
+  for (int tile_y = start_tile_y; screen_y < viewport_height_px; tile_y++) {
     int screen_x = -offset_x;
-    for (int tile_x = start_tile_x; screen_x < ctx->viewport_width_px;
-         tile_x++) {
+    for (int tile_x = start_tile_x; screen_x < viewport_width_px; tile_x++) {
       // Check if tile is within map bounds
-      if (tile_x >= 0 && tile_x < (int)world->map.width && tile_y >= 0 &&
-          tile_y < (int)world->map.height) {
+      if (tile_x >= 0 && tile_x < (int)WORLD.map.width && tile_y >= 0 &&
+          tile_y < (int)WORLD.map.height) {
 
         // Draw water overlay on ALL tiles (after lighting/darkness)
         uint8_t water_depth =
-            world->map.water_depth[tile_y * MAP_WIDTH_MAX + tile_x];
+            WORLD.map.water_depth[tile_y * MAP_WIDTH_MAX + tile_x];
         water_depth = 0;
         if (water_depth > 0) {
           // Check if neighbors have different depths (need interpolation)
           uint8_t left =
-              get_water_depth(&world->map, tile_x - 1, tile_y, water_depth);
+              get_water_depth(&WORLD.map, tile_x - 1, tile_y, water_depth);
           uint8_t right =
-              get_water_depth(&world->map, tile_x + 1, tile_y, water_depth);
+              get_water_depth(&WORLD.map, tile_x + 1, tile_y, water_depth);
           uint8_t up =
-              get_water_depth(&world->map, tile_x, tile_y - 1, water_depth);
+              get_water_depth(&WORLD.map, tile_x, tile_y - 1, water_depth);
           uint8_t down =
-              get_water_depth(&world->map, tile_x, tile_y + 1, water_depth);
+              get_water_depth(&WORLD.map, tile_x, tile_y + 1, water_depth);
 
           bool needs_interpolation =
               (left != water_depth || right != water_depth ||
@@ -748,13 +646,13 @@ void game_render(WorldState *world, RenderContext *ctx) {
           if (needs_interpolation) {
             // Expensive path: corner interpolation
             uint8_t tl_depth = calc_corner_water_depth(
-                &world->map, tile_x, tile_y, 0, 0, water_depth);
+                &WORLD.map, tile_x, tile_y, 0, 0, water_depth);
             uint8_t tr_depth = calc_corner_water_depth(
-                &world->map, tile_x, tile_y, 1, 0, water_depth);
+                &WORLD.map, tile_x, tile_y, 1, 0, water_depth);
             uint8_t bl_depth = calc_corner_water_depth(
-                &world->map, tile_x, tile_y, 0, 1, water_depth);
+                &WORLD.map, tile_x, tile_y, 0, 1, water_depth);
             uint8_t br_depth = calc_corner_water_depth(
-                &world->map, tile_x, tile_y, 1, 1, water_depth);
+                &WORLD.map, tile_x, tile_y, 1, 1, water_depth);
 
             uint8_t tl_alpha = tl_depth / 2;
             uint8_t tr_alpha = tr_depth / 2;
@@ -765,13 +663,13 @@ void game_render(WorldState *world, RenderContext *ctx) {
             Color tr = {0, 100, 200, tr_alpha};
             Color bl = {0, 100, 200, bl_alpha};
             Color br = {0, 100, 200, br_alpha};
-            geobuilder_rect_colored(&geom, screen_x, screen_y, ctx->tile_size,
-                                    ctx->tile_size, tl, tr, bl, br);
+            geobuilder_rect_colored(&geom, screen_x, screen_y, tile_size,
+                                    tile_size, tl, tr, bl, br);
           } else {
             // Cheap path: flat color
             uint8_t water_alpha = water_depth / 2;
-            geobuilder_rect(&geom, screen_x, screen_y, ctx->tile_size,
-                            ctx->tile_size, (Color){0, 100, 200, water_alpha});
+            geobuilder_rect(&geom, screen_x, screen_y, tile_size, tile_size,
+                            (Color){0, 100, 200, water_alpha});
           }
 
           // Draw water debug value
@@ -784,28 +682,24 @@ void game_render(WorldState *world, RenderContext *ctx) {
 
         // Check if this tile is visible
         bool tile_visible =
-            world->map.cells[tile_y * MAP_WIDTH_MAX + tile_x].visible;
+            WORLD.map.cells[tile_y * MAP_WIDTH_MAX + tile_x].visible;
 
         if (tile_visible) {
           // Check if this tile has any lighting (to decide if we need expensive
           // corner sampling)
-          uint8_t tile_light = calc_tile_light(&world->map, tile_x, tile_y,
+          uint8_t tile_light = calc_tile_light(&WORLD.map, tile_x, tile_y,
                                                player_tile_x, player_tile_y);
 
           if (tile_light > 63) {
             // Tile has some lighting - do full corner interpolation
-            uint8_t tl_light =
-                calc_corner_light(&world->map, tile_x, tile_y, 0, 0,
-                                  player_tile_x, player_tile_y);
-            uint8_t tr_light =
-                calc_corner_light(&world->map, tile_x, tile_y, 1, 0,
-                                  player_tile_x, player_tile_y);
-            uint8_t bl_light =
-                calc_corner_light(&world->map, tile_x, tile_y, 0, 1,
-                                  player_tile_x, player_tile_y);
-            uint8_t br_light =
-                calc_corner_light(&world->map, tile_x, tile_y, 1, 1,
-                                  player_tile_x, player_tile_y);
+            uint8_t tl_light = calc_corner_light(
+                &WORLD.map, tile_x, tile_y, 0, 0, player_tile_x, player_tile_y);
+            uint8_t tr_light = calc_corner_light(
+                &WORLD.map, tile_x, tile_y, 1, 0, player_tile_x, player_tile_y);
+            uint8_t bl_light = calc_corner_light(
+                &WORLD.map, tile_x, tile_y, 0, 1, player_tile_x, player_tile_y);
+            uint8_t br_light = calc_corner_light(
+                &WORLD.map, tile_x, tile_y, 1, 1, player_tile_x, player_tile_y);
 
             // Apply flicker to light values (only in lit areas)
             tl_light = tl_light > 63 ? (uint8_t)(63 + (tl_light - 63) * flicker)
@@ -822,8 +716,8 @@ void game_render(WorldState *world, RenderContext *ctx) {
             Color tr = {0, 0, 0, (uint8_t)(255 - tr_light)};
             Color bl = {0, 0, 0, (uint8_t)(255 - bl_light)};
             Color br = {0, 0, 0, (uint8_t)(255 - br_light)};
-            geobuilder_rect_colored(&geom, screen_x, screen_y, ctx->tile_size,
-                                    ctx->tile_size, tl, tr, bl, br);
+            geobuilder_rect_colored(&geom, screen_x, screen_y, tile_size,
+                                    tile_size, tl, tr, bl, br);
 
             // Draw debug info if enabled
             if (WORLD.debug_show_light_values) {
@@ -833,37 +727,37 @@ void game_render(WorldState *world, RenderContext *ctx) {
             }
           } else {
             // Tile is visible but outside torch radius - uniform darkness
-            geobuilder_rect(&geom, screen_x, screen_y, ctx->tile_size,
-                            ctx->tile_size, (Color){0, 0, 0, 192});
+            geobuilder_rect(&geom, screen_x, screen_y, tile_size, tile_size,
+                            (Color){0, 0, 0, 192});
           }
         } else {
           // Non-visible tile - draw uniform full darkness
-          geobuilder_rect(&geom, screen_x, screen_y, ctx->tile_size,
-                          ctx->tile_size, (Color){0, 0, 0, 192});
+          geobuilder_rect(&geom, screen_x, screen_y, tile_size, tile_size,
+                          (Color){0, 0, 0, 192});
         }
       }
-      screen_x += ctx->tile_size;
+      screen_x += tile_size;
     }
-    screen_y += ctx->tile_size;
+    screen_y += tile_size;
   }
 
 // Draw message log at bottom of screen
-#define MESSAGE_DISPLAY_LINES 5
+#define MESSAGE_DISPLAY_LINES 10
 
   // Get the most recent N messages
   int messages_to_show = MESSAGE_DISPLAY_LINES;
-  if (messages_to_show > (int)world->messages.count) {
-    messages_to_show = world->messages.count;
+  if (messages_to_show > (int)WORLD.messages.count) {
+    messages_to_show = WORLD.messages.count;
   }
 
   for (int i = 0; i < messages_to_show; i++) {
     // Get the i-th most recent message (counting from end)
-    int offset = (int)world->messages.count - messages_to_show + i;
-    int msg_idx = (world->messages.first + offset) % MESSAGE_COUNT_MAX;
-    const char *text = world->messages.buffer[msg_idx].text;
+    int offset = (int)WORLD.messages.count - messages_to_show + i;
+    int msg_idx = (WORLD.messages.first + offset) % MESSAGE_COUNT_MAX;
+    const char *text = WORLD.messages.buffer[msg_idx].text;
 
     // Position from bottom up
-    int y = ctx->viewport_height_px - (messages_to_show - i) * ctx->tile_size;
+    int y = viewport_height_px - (messages_to_show - i) * tile_size;
 
     geobuilder_text(&geom, 0, y, 1.0f, TEXT_ALIGN_LEFT, (Color){.a = 192}, "%s",
                     text);
@@ -871,40 +765,10 @@ void game_render(WorldState *world, RenderContext *ctx) {
 
   // Draw FPS in upper right corner
   if (WORLD.fps > 0.0f) {
-    geobuilder_text(&geom, ctx->viewport_width_px, 0, 1.0f, TEXT_ALIGN_RIGHT,
+    geobuilder_text(&geom, viewport_width_px, 0, 1.0f, TEXT_ALIGN_RIGHT,
                     (Color){.a = 192}, "%.1f FPS", (double)WORLD.fps);
   }
 
   // Flush any remaining vertices
   geobuilder_flush(&geom);
 }
-
-#ifdef __wasm__
-extern unsigned char __heap_base;
-extern unsigned char __data_end;
-extern unsigned char __stack_pointer;
-
-unsigned char *get_heap_base(void) { return &__heap_base; }
-
-// WASM-friendly render function that takes viewport dimensions directly
-// and uses the imported submit_geometry function
-// Imported from JavaScript
-extern void submit_geometry(void *impl_data, const Vertex *vertices,
-                            int vertex_count);
-
-void game_render_wasm(WorldState *world, int viewport_width_px,
-                      int viewport_height_px, int tile_size, int atlas_width_px,
-                      int atlas_height_px) {
-  RenderContext ctx = {
-      .viewport_width_px = viewport_width_px,
-      .viewport_height_px = viewport_height_px,
-      .tile_size = tile_size,
-      .atlas_width_px = atlas_width_px,
-      .atlas_height_px = atlas_height_px,
-      .submit_geometry = submit_geometry,
-      .impl_data = NULL, // Not used in WASM
-  };
-
-  game_render(world, &ctx);
-}
-#endif

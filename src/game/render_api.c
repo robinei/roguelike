@@ -1,5 +1,5 @@
 #include "render_api.h"
-#include "prnf.h"
+#include "utils/prnf.h"
 #include <stdarg.h>
 
 // Tile atlas constants
@@ -15,8 +15,7 @@ void geobuilder_clear(GeometryBuilder *geom) { geom->count = 0; }
 
 void geobuilder_flush(GeometryBuilder *geom) {
   if (geom->count > 0) {
-    geom->ctx->submit_geometry(geom->ctx->impl_data, geom->vertices,
-                               geom->count);
+    host_submit_geometry(geom->vertices, geom->count);
     geom->count = 0;
   }
 }
@@ -116,7 +115,7 @@ void geobuilder_rect(GeometryBuilder *geom, int x, int y, int w, int h,
 }
 
 void geobuilder_rect_colored(GeometryBuilder *geom, int x, int y, int w, int h,
-                              Color tl, Color tr, Color bl, Color br) {
+                             Color tl, Color tr, Color bl, Color br) {
   RenderContext *ctx = geom->ctx;
 
   // Calculate white tile position in atlas
@@ -140,12 +139,10 @@ void geobuilder_rect_colored(GeometryBuilder *geom, int x, int y, int w, int h,
   float yc = (y0 + y1) / 2.0f; // center y
 
   // Center color is average of all 4 corners
-  Color center = {
-    (uint8_t)((tl.r + tr.r + bl.r + br.r) / 4),
-    (uint8_t)((tl.g + tr.g + bl.g + br.g) / 4),
-    (uint8_t)((tl.b + tr.b + bl.b + br.b) / 4),
-    (uint8_t)((tl.a + tr.a + bl.a + br.a) / 4)
-  };
+  Color center = {(uint8_t)((tl.r + tr.r + bl.r + br.r) / 4),
+                  (uint8_t)((tl.g + tr.g + bl.g + br.g) / 4),
+                  (uint8_t)((tl.b + tr.b + bl.b + br.b) / 4),
+                  (uint8_t)((tl.a + tr.a + bl.a + br.a) / 4)};
 
   geobuilder_flush_if_full(geom, 12); // 4 triangles = 12 vertices
 
