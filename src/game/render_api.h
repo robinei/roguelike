@@ -82,4 +82,4 @@ typedef enum {
 // If bg_color alpha is 0, no background is drawn
 // scale: 1.0 = tile_size, 0.5 = half size, etc.
 void geobuilder_text(GeometryBuilder *geom, int x, int y, float scale,
-                     TextAlign align, Color bg_color, const char *fmt, ...);
+                     TextAlign align, Color bg_color, const char *text);

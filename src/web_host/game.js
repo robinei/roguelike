@@ -2,6 +2,9 @@
 let memory = null;
 let wasmExports = null;
 
+// Reusable text decoder (much faster than creating new one each time)
+const textDecoder = new TextDecoder();
+
 // WebGL resources
 let gl = null;
 let shaderProgram = null;
@@ -173,7 +176,7 @@ function readString(ptr) {
   const bytes = new Uint8Array(memory.buffer);
   let end = ptr;
   while (bytes[end] !== 0) end++;
-  return new TextDecoder().decode(bytes.subarray(ptr, end));
+  return textDecoder.decode(bytes.subarray(ptr, end));
 }
 
 // Initialize IndexedDB for chunk persistence
@@ -297,7 +300,7 @@ const wasmImports = {
 
     host_load_chunk(chunk_key) {
       if (!db) {
-        console.error('[WASM] IndexedDB not initialized');
+        console.error('[JS] IndexedDB not initialized');
         wasmExports.game_chunk_loaded(chunk_key, 0, 0);
         return;
       }
@@ -316,7 +319,7 @@ const wasmImports = {
             const chunkData = new Uint8Array(request.result);
 
             if (chunkData.byteLength > MAX_CHUNK_SIZE) {
-              console.error(`[WASM] Chunk too large: ${chunkData.byteLength} > ${MAX_CHUNK_SIZE}`);
+              console.error(`[JS] Chunk too large: ${chunkData.byteLength} > ${MAX_CHUNK_SIZE}`);
               wasmExports.game_chunk_loaded(chunk_key, 0, 0);
               return;
             }
@@ -325,37 +328,37 @@ const wasmImports = {
             const wasmMemory = new Uint8Array(memory.buffer);
             wasmMemory.set(chunkData, chunkStagingBuffer);
 
-            console.log(`[WASM] Loaded chunk ${chunk_key} (${chunkData.byteLength} bytes)`);
+            console.log(`[JS] Loaded chunk ${chunk_key} (${chunkData.byteLength} bytes)`);
 
             // Call back with pointer to staging buffer
             // Game must copy this data immediately before it's overwritten
             wasmExports.game_chunk_loaded(chunk_key, chunkStagingBuffer, chunkData.byteLength);
           } else {
             // Chunk not found - game will generate new chunk
-            console.log(`[WASM] Chunk ${chunk_key} not found in storage`);
+            console.log(`[JS] Chunk ${chunk_key} not found in storage`);
             wasmExports.game_chunk_loaded(chunk_key, 0, 0);
           }
         };
 
         request.onerror = () => {
-          console.error('[WASM] Error loading chunk:', request.error);
+          console.error('[JS] Error loading chunk:', request.error);
           wasmExports.game_chunk_loaded(chunk_key, 0, 0);
         };
       } catch (error) {
-        console.error('[WASM] Exception loading chunk:', error);
+        console.error('[JS] Exception loading chunk:', error);
         wasmExports.game_chunk_loaded(chunk_key, 0, 0);
       }
     },
 
     host_store_chunk(chunk_key, dataPtr, dataSize) {
       if (!db) {
-        console.error('[WASM] IndexedDB not initialized');
+        console.error('[JS] IndexedDB not initialized');
         wasmExports.game_chunk_stored(chunk_key, false);
         return;
       }
 
       if (dataSize === 0) {
-        console.warn('[WASM] Attempted to store empty chunk');
+        console.warn('[JS] Attempted to store empty chunk');
         wasmExports.game_chunk_stored(chunk_key, false);
         return;
       }
@@ -374,16 +377,16 @@ const wasmImports = {
         const request = objectStore.put(chunkData, key);
 
         request.onsuccess = () => {
-          console.log(`[WASM] Stored chunk ${chunk_key} (${dataSize} bytes)`);
+          console.log(`[JS] Stored chunk ${chunk_key} (${dataSize} bytes)`);
           wasmExports.game_chunk_stored(chunk_key, true);
         };
 
         request.onerror = () => {
-          console.error('[WASM] Error storing chunk:', request.error);
+          console.error('[JS] Error storing chunk:', request.error);
           wasmExports.game_chunk_stored(chunk_key, false);
         };
       } catch (error) {
-        console.error('[WASM] Exception storing chunk:', error);
+        console.error('[JS] Exception storing chunk:', error);
         wasmExports.game_chunk_stored(chunk_key, false);
       }
     },
@@ -397,20 +400,24 @@ async function initWasm() {
   wasmImports.env.memory = memory;
 
   // Load and instantiate WASM module
-  const response = await fetch('game.wasm');
-  const wasmBytes = await response.arrayBuffer();
-  const wasmModule = await WebAssembly.instantiate(wasmBytes, wasmImports);
+  // Use instantiateStreaming for better performance and source map support
+  const wasmModule = await WebAssembly.instantiateStreaming(
+    fetch('game.wasm'),
+    wasmImports
+  );
 
   wasmExports = wasmModule.instance.exports;
 
   // Get heap base (start of usable game memory)
   const heapBase = wasmExports.get_heap_base();
+  const dataEnd = wasmExports.get_data_end();
 
   // Query how much memory the game needs
   const requiredBytes = wasmExports.game_get_memory_size();
-  const availableBytes = memory.buffer.byteLength - heapBase;
+  const totalBytes = memory.buffer.byteLength;
+  const availableBytes = totalBytes - heapBase;
 
-  console.log(`Heap starts at ${heapBase}, game needs ${requiredBytes} bytes, available ${availableBytes} bytes`);
+  console.log(`Data ends at ${dataEnd}, heap starts at ${heapBase}, game needs ${requiredBytes} bytes, available ${availableBytes} bytes of ${totalBytes} bytes total`);
 
   if (requiredBytes > availableBytes) {
     throw new Error(`Insufficient memory: need ${requiredBytes}, have ${availableBytes}`);

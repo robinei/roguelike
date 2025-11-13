@@ -4,11 +4,12 @@
 #include "random.h"
 #include "render_api.h"
 #include "utils/bbuf.h"
+#include "utils/print.h"
 #include "utils/sdefl.h"
 #include "utils/sinfl.h"
 #include "world.h"
-#include <stdint.h>
-#include <string.h>
+
+#define CHUNK_BUFFER_SIZE (512 * 1024)
 
 bool map_get_random_passable(Map *map, int region_x, int region_y,
                              int region_width, int region_height,
@@ -37,7 +38,7 @@ void generate_chunk(int chunk_x, int chunk_y) {
   int world_chunk_x = WORLD.worldmap.curr_chunk_x + (chunk_x - 1);
   int world_chunk_y = WORLD.worldmap.curr_chunk_y + (chunk_y - 1);
   assert(world_chunk_x >= 0 && world_chunk_x < MAP_CHUNK_TOTAL_X);
-  assert(world_chunk_y >= 0 && world_chunk_y < MAP_CHUNK_TOTAL_X);
+  assert(world_chunk_y >= 0 && world_chunk_y < MAP_CHUNK_TOTAL_Y);
 
   int world_chunk_idx = world_chunk_y * MAP_CHUNK_TOTAL_X + world_chunk_x;
 
@@ -59,7 +60,13 @@ void generate_chunk(int chunk_x, int chunk_y) {
                     MAP_CHUNK_HEIGHT, &csp_params);
 
   WORLD.worldmap.chunks[world_chunk_idx].state = CHUNK_LOADED;
-  output_message("Generated chunk (%d, %d)", world_chunk_x, world_chunk_y);
+
+  PRINT(msg, 64, "Generated chunk (");
+  print_int(&msg, world_chunk_x);
+  print_str(&msg, ", ");
+  print_int(&msg, world_chunk_y);
+  print_char(&msg, ')');
+  output_message(msg.data);
 }
 
 static uint64_t calc_chunk_key(int world_chunk_x, int world_chunk_y) {
@@ -118,12 +125,13 @@ static void serialize_chunk(int chunk_x, int chunk_y, ByteBuffer *buf,
 // Deserialize a chunk's map data and entities from a buffer
 void deserialize_chunk(int chunk_x, int chunk_y, const void *data,
                        size_t data_size) {
-  // Decompress the data first
-  static uint8_t decompressed_buffer[512 * 1024];
+  ArenaCheckpoint checkpoint = arena_checkpoint(&WORLD.arena);
+  uint8_t *decompressed_buffer = arena_alloc(&WORLD.arena, CHUNK_BUFFER_SIZE);
+
   int decompressed_size =
       sinflate(decompressed_buffer, (const uint8_t *)data, data_size);
   assert(decompressed_size > 0 && "Decompression failed");
-  assert(decompressed_size <= (int)sizeof(decompressed_buffer));
+  assert(decompressed_size <= CHUNK_BUFFER_SIZE);
 
   ByteBuffer buf = {
       .size = decompressed_size,
@@ -184,6 +192,8 @@ void deserialize_chunk(int chunk_x, int chunk_y, const void *data,
       }
     }
   }
+
+  arena_restore(&WORLD.arena, checkpoint);
 }
 
 static void page_in_chunk(int chunk_x, int chunk_y) {
@@ -193,10 +203,29 @@ static void page_in_chunk(int chunk_x, int chunk_y) {
   // Calculate world chunk coordinates
   int world_chunk_x = WORLD.worldmap.curr_chunk_x + (chunk_x - 1);
   int world_chunk_y = WORLD.worldmap.curr_chunk_y + (chunk_y - 1);
+
+  // Bounds check (assertions will trap if out of bounds)
   assert(world_chunk_x >= 0 && world_chunk_x < MAP_CHUNK_TOTAL_X);
-  assert(world_chunk_y >= 0 && world_chunk_y < MAP_CHUNK_TOTAL_X);
+  assert(world_chunk_y >= 0 && world_chunk_y < MAP_CHUNK_TOTAL_Y);
 
   int world_chunk_idx = world_chunk_y * MAP_CHUNK_TOTAL_X + world_chunk_x;
+
+  // Sanity check the index
+  if (world_chunk_idx < 0 ||
+      world_chunk_idx >= MAP_CHUNK_TOTAL_X * MAP_CHUNK_TOTAL_Y) {
+    char buf[64];
+    PrintBuf msg = {.data = buf, .capacity = 64, .length = 0};
+    print_str(&msg, "FATAL: bad chunk idx ");
+    print_int(&msg, world_chunk_idx);
+    print_str(&msg, " (");
+    print_int(&msg, world_chunk_x);
+    print_str(&msg, ",");
+    print_int(&msg, world_chunk_y);
+    print_str(&msg, ")");
+    host_log(LOG_ERROR, msg.data);
+    return;
+  }
+
   ChunkState state = WORLD.worldmap.chunks[world_chunk_idx].state;
 
   // Skip if already loaded or loading
@@ -208,7 +237,6 @@ static void page_in_chunk(int chunk_x, int chunk_y) {
   WORLD.worldmap.chunks[world_chunk_idx].state = CHUNK_LOADING;
 
   uint64_t chunk_key = calc_chunk_key(world_chunk_x, world_chunk_y);
-  output_message("Loading chunk (%d, %d)", world_chunk_x, world_chunk_y);
   host_load_chunk(chunk_key);
 
   // The callback game_chunk_loaded() will either deserialize or generate
@@ -217,23 +245,23 @@ static void page_in_chunk(int chunk_x, int chunk_y) {
 static void page_out_chunk(int chunk_x, int chunk_y) {
   assert(chunk_x >= 0 && chunk_x < MAP_CHUNK_WINDOW_X);
   assert(chunk_y >= 0 && chunk_y < MAP_CHUNK_WINDOW_Y);
-
-  // Calculate world chunk coordinates
   int world_chunk_x = WORLD.worldmap.curr_chunk_x + (chunk_x - 1);
   int world_chunk_y = WORLD.worldmap.curr_chunk_y + (chunk_y - 1);
   assert(world_chunk_x >= 0 && world_chunk_x < MAP_CHUNK_TOTAL_X);
-  assert(world_chunk_y >= 0 && world_chunk_y < MAP_CHUNK_TOTAL_X);
-
+  assert(world_chunk_y >= 0 && world_chunk_y < MAP_CHUNK_TOTAL_Y);
   int world_chunk_idx = world_chunk_y * MAP_CHUNK_TOTAL_X + world_chunk_x;
   if (WORLD.worldmap.chunks[world_chunk_idx].state != CHUNK_LOADED) {
     return; // Not loaded, nothing to save
   }
 
-  // Serialize chunk to stack-allocated buffer (512KB should be enough)
-  uint8_t buffer[512 * 1024];
+  // Save arena checkpoint
+  ArenaCheckpoint checkpoint = arena_checkpoint(&WORLD.arena);
+
+  // Allocate serialization buffer from arena
+  uint8_t *buffer = arena_alloc(&WORLD.arena, CHUNK_BUFFER_SIZE);
   ByteBuffer buf = {
       .size = 0,
-      .capacity = sizeof(buffer),
+      .capacity = CHUNK_BUFFER_SIZE,
       .data = buffer,
   };
 
@@ -243,21 +271,29 @@ static void page_out_chunk(int chunk_x, int chunk_y) {
   // Compress the serialized data
   int uncompressed_size = buf.size;
   int max_compressed_size = sdefl_bound(uncompressed_size);
-
-  // Use static buffer for compression output (512KB should be enough)
-  static uint8_t compressed_buffer[512 * 1024];
-  assert(max_compressed_size <= (int)sizeof(compressed_buffer));
-
-  struct sdefl sdefl_ctx = {0};
-  int compressed_size = sdeflate(&sdefl_ctx, compressed_buffer, buf.data,
+  uint8_t *compressed_buffer = arena_alloc(&WORLD.arena, max_compressed_size);
+  struct sdefl *sdefl_ctx = arena_alloc(&WORLD.arena, sizeof(struct sdefl));
+  int compressed_size = sdeflate(sdefl_ctx, compressed_buffer, buf.data,
                                  uncompressed_size, SDEFL_LVL_DEF);
 
   // Store compressed chunk to host storage
   uint64_t chunk_key = calc_chunk_key(world_chunk_x, world_chunk_y);
-  output_message("Saving chunk (%d, %d): %d -> %d bytes (%.1f%%)",
-                 world_chunk_x, world_chunk_y, uncompressed_size,
-                 compressed_size, 100.0f * compressed_size / uncompressed_size);
+
+  PRINT(msg, 128, "Saving chunk (");
+  print_int(&msg, world_chunk_x);
+  print_str(&msg, ", ");
+  print_int(&msg, world_chunk_y);
+  print_str(&msg, "): ");
+  print_int(&msg, uncompressed_size);
+  print_str(&msg, " -> ");
+  print_int(&msg, compressed_size);
+  print_str(&msg, " bytes");
+  output_message(msg.data);
+
   host_store_chunk(chunk_key, compressed_buffer, compressed_size);
+
+  // Restore arena checkpoint to free compression buffers
+  arena_restore(&WORLD.arena, checkpoint);
 
   // Free all entities that were saved (including descendants)
   entityset_free(&entities_to_free);
@@ -269,6 +305,7 @@ static void page_out_chunk(int chunk_x, int chunk_y) {
 // Shift the map window by (dx, dy) chunks when player crosses chunk boundary
 // Uses in-place shifting: iterate in the right direction to avoid overwriting
 static void shift_map_window(int dx, int dy) {
+  host_log(LOG_DEBUG, "ENTER shift_map_window");
   // Mark outgoing chunks as not generated (so they can be regenerated later)
   for (int cy = 0; cy < MAP_CHUNK_WINDOW_Y; cy++) {
     for (int cx = 0; cx < MAP_CHUNK_WINDOW_X; cx++) {
@@ -287,6 +324,7 @@ static void shift_map_window(int dx, int dy) {
         if (world_chunk_x >= 0 && world_chunk_x < MAP_CHUNK_TOTAL_X &&
             world_chunk_y >= 0 && world_chunk_y < MAP_CHUNK_TOTAL_Y) {
           // Page out chunk (saves and frees entities, marks as CHUNK_UNLOADED)
+          host_log(LOG_DEBUG, "CALL page_out_chunk");
           page_out_chunk(cx, cy);
         }
       }
@@ -370,7 +408,6 @@ void ensure_chunks_around_position(int player_x, int player_y) {
   int player_chunk_y = player_y / MAP_CHUNK_HEIGHT; // 0, 1, or 2
   assert(player_chunk_x >= 0 && player_chunk_x <= MAP_CHUNK_WINDOW_X);
   assert(player_chunk_y >= 0 && player_chunk_y <= MAP_CHUNK_WINDOW_Y);
-
   // Calculate offset from center chunk
   int dx = player_chunk_x - MAP_CHUNK_WINDOW_X / 2; // -1, 0, or +1
   int dy = player_chunk_y - MAP_CHUNK_WINDOW_Y / 2; // -1, 0, or +1
@@ -378,12 +415,23 @@ void ensure_chunks_around_position(int player_x, int player_y) {
   assert(dy * dy <= 1);
 
   if (dx != 0 || dy != 0) {
+    int new_chunk_x = WORLD.worldmap.curr_chunk_x + dx;
+    int new_chunk_y = WORLD.worldmap.curr_chunk_y + dy;
+
+    // Ensure we stay within world bounds (with room for 3x3 window)
+    if (new_chunk_x < 1 || new_chunk_x >= MAP_CHUNK_TOTAL_X - 1 ||
+        new_chunk_y < 1 || new_chunk_y >= MAP_CHUNK_TOTAL_Y - 1) {
+      // Hit world edge - don't allow movement
+      host_log(LOG_WARN, "Cannot move - world boundary reached");
+      return;
+    }
+
     // Player crossed chunk boundary - shift the window
     shift_map_window(dx, dy);
 
     // Update world chunk coordinates
-    WORLD.worldmap.curr_chunk_x += dx;
-    WORLD.worldmap.curr_chunk_y += dy;
+    WORLD.worldmap.curr_chunk_x = new_chunk_x;
+    WORLD.worldmap.curr_chunk_y = new_chunk_y;
   }
 
   // Generate only the chunk the player is standing on (center chunk)

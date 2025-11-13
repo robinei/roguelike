@@ -3,22 +3,10 @@
 #include "events/events.h"
 #include "parts.h"
 
-#define PRNF_SUPPORT_FLOAT
-#define PRNF_SUPPORT_DOUBLE
-#define PRNF_SUPPORT_LONG_LONG
-#define PRNF_ENG_PREC_DEFAULT 0
-#define PRNF_FLOAT_PREC_DEFAULT 3
-#define PRNF_COL_ALIGNMENT
-#define PRNF_IMPLEMENTATION
-#include "utils/prnf.h"
-
 // declare global WorldState pointer
 WorldState *active_world;
 
-void output_message(const char *fmt, ...) {
-  va_list args;
-  va_start(args, fmt);
-
+void output_message(const char *text) {
   // If buffer is full, drop oldest message
   if (WORLD.messages.count == MESSAGE_COUNT_MAX) {
     WORLD.messages.first = (WORLD.messages.first + 1) % MESSAGE_COUNT_MAX;
@@ -30,12 +18,12 @@ void output_message(const char *fmt, ...) {
   uint32_t pos =
       (WORLD.messages.first + WORLD.messages.count - 1) % MESSAGE_COUNT_MAX;
   Message *msg = &WORLD.messages.buffer[pos];
-  msg->length = vsnprnf(msg->text, MESSAGE_LENGTH_MAX + 1, fmt, args);
+  msg->length = strlen(text);
   if (msg->length > MESSAGE_LENGTH_MAX) {
     msg->length = MESSAGE_LENGTH_MAX;
   }
-
-  va_end(args);
+  memcpy(msg->text, text, msg->length);
+  msg->text[msg->length] = '\0';
 }
 
 void entityset_add(EntitySet *set, EntityIndex index) {

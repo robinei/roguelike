@@ -8,8 +8,7 @@
 #define STRINGIFY(x) #x
 #define TOSTRING(x) STRINGIFY(x)
 
-// Log levels matching mostly having equivalents in JavaScript console and
-// SDL3's logging system
+// Log levels mostly having equivalents in JavaScript and SDL3
 typedef enum {
   LOG_DEBUG,
   LOG_LOG,
@@ -43,40 +42,37 @@ typedef enum {
 // Functions exposed by the Host for use by the Game:
 // ============================================================================
 
-#ifdef __wasm__
-
-// for WASM the interface to the Host will be imported as externs from JS:
-
-extern void host_log(LogLevel level, const char *message);
-extern void host_submit_geometry(const Vertex *vertices, int vertex_count);
-extern void host_load_chunk(uint64_t chunk_key);
-extern void host_store_chunk(uint64_t chunk_key, const void *data,
-                             size_t data_size);
-
-#else
-
-// when compiled for native, the interface to the Host will be provided by the
-// host (in a call to game_set_host_functions):
-
+#define HOST_LOG_NAME host_log
 #define HOST_LOG_SIG(name) void name(LogLevel level, const char *message)
 typedef HOST_LOG_SIG((*HostLogFn));
 
+#define HOST_SUBMIT_GEOMETRY_NAME host_submit_geometry
 #define HOST_SUBMIT_GEOMETRY_SIG(name)                                         \
   void name(const Vertex *vertices, int vertex_count)
 typedef HOST_SUBMIT_GEOMETRY_SIG((*HostSubmitGeometryFn));
 
+#define HOST_LOAD_CHUNK_NAME host_load_chunk
 #define HOST_LOAD_CHUNK_SIG(name) void name(uint64_t chunk_key)
 typedef HOST_LOAD_CHUNK_SIG((*HostLoadChunkFn));
 
+#define HOST_STORE_CHUNK_NAME host_store_chunk
 #define HOST_STORE_CHUNK_SIG(name)                                             \
   void name(uint64_t chunk_key, const void *data, size_t data_size)
 typedef HOST_STORE_CHUNK_SIG((*HostStoreChunkFn));
 
-extern HostLogFn host_log;
-extern HostSubmitGeometryFn host_submit_geometry;
-extern HostLoadChunkFn host_load_chunk;
-extern HostStoreChunkFn host_store_chunk;
-
+#ifdef __wasm__
+// for WASM the interface to the Host will be imported as externs from JS:
+extern HOST_LOG_SIG(HOST_LOG_NAME);
+extern HOST_SUBMIT_GEOMETRY_SIG(HOST_SUBMIT_GEOMETRY_NAME);
+extern HOST_LOAD_CHUNK_SIG(HOST_LOAD_CHUNK_NAME);
+extern HOST_STORE_CHUNK_SIG(HOST_STORE_CHUNK_NAME);
+#else
+// when compiled for native, the interface to the Host will be provided by the
+// host (in a call to game_set_host_functions):
+extern HostLogFn HOST_LOG_NAME;
+extern HostSubmitGeometryFn HOST_SUBMIT_GEOMETRY_NAME;
+extern HostLoadChunkFn HOST_LOAD_CHUNK_NAME;
+extern HostStoreChunkFn HOST_STORE_CHUNK_NAME;
 #endif
 
 // ============================================================================

@@ -1,3 +1,4 @@
+#include "utils/print.h"
 #include "world.h"
 
 // ============================================================================
@@ -134,11 +135,20 @@ void turn_queue_debug_print() {
   TurnSchedule saved_schedule[MAX_ENTITIES];
   memcpy(saved_schedule, &PART(TurnSchedule, 0), sizeof(saved_schedule));
 
-  output_message("Turn queue (%d entities):\n", WORLD.turn_queue.count);
+  PRINT(msg, 256, "Turn queue (");
+  print_int(&msg, WORLD.turn_queue.count);
+  print_str(&msg, "entities):");
+  output_message(msg.data);
+
   while (WORLD.turn_queue.count > 0) {
     EntityHandle h = turn_queue_pop();
     EntityIndex e = entity_handle_to_index(h);
-    output_message("  Entity %d: delay=%d\n", e, PART(TurnSchedule, e).delay);
+
+    PRINT(msg, 256, "  Entity ");
+    print_int(&msg, e);
+    print_str(&msg, ": delay=");
+    print_int(&msg, PART(TurnSchedule, e).delay);
+    output_message(msg.data);
   }
 
   // Restore queue and turn_schedule part array

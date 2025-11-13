@@ -6,6 +6,7 @@
 #include "particles.h"
 #include "parts.h"
 #include "turn_queue.h"
+#include "utils/arena.h"
 #include "utils/bbuf.h"
 
 #define TURN_INTERVAL 100
@@ -102,6 +103,10 @@ typedef struct {
 
   // Debug flags
   bool debug_show_light_values;
+
+  // Arena allocator with 4MB scratch buffer
+  uint8_t arena_buffer[4 * 1024 * 1024];
+  Arena arena;
 } WorldState;
 
 extern WorldState *active_world;

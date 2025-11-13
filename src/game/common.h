@@ -20,6 +20,21 @@
 #define memcpy __builtin_memcpy
 #define memset __builtin_memset
 
+static inline unsigned long strlen(const char *s) {
+  const char *p = s;
+  while (*p)
+    p++;
+  return p - s;
+}
+
+static inline int strcmp(const char *s1, const char *s2) {
+  while (*s1 && (*s1 == *s2)) {
+    s1++;
+    s2++;
+  }
+  return *(unsigned char *)s1 - *(unsigned char *)s2;
+}
+
 // Simple assert for WASM builds - log file:line and trap on failure
 #define assert(x)                                                              \
   do {                                                                         \
@@ -79,7 +94,7 @@ static inline float clamp_float(float x, float min, float max) {
   return x;
 }
 
-void output_message(const char *fmt, ...);
+void output_message(const char *text);
 
 // ============================================================================
 // Static max Map dimensions

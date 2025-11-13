@@ -19,8 +19,8 @@ GAMELIB_TARGET = $(BUILDDIR)/libgame.so
 # WASM build (for web host)
 # ============================================================================
 WASM_CC = clang
-WASM_CFLAGS = -std=c99 -Wall -Wextra -O3 --target=wasm32
-WASM_LDFLAGS = -nostdlib -Wl,--no-entry -Wl,--export-all -Wl,--allow-undefined -Wl,--import-memory -Wl,-z,stack-size=1048576
+WASM_CFLAGS = -std=c99 -Wall -Wextra -g -O2 --target=wasm32 -fdebug-compilation-dir=.
+WASM_LDFLAGS = -nostdlib -Wl,--no-entry -Wl,--export-all -Wl,--allow-undefined -Wl,--import-memory -Wl,-z,stack-size=1048576 -g
 WASM_OBJS = $(GAME_SRCS:%.c=$(BUILDDIR)/wasm/%.o)
 WASM_TARGET = $(BUILDDIR)/game.wasm
 
@@ -59,8 +59,15 @@ wasm: $(WASM_TARGET) $(COMBINED_ATLAS)
 	@mkdir -p $(WEB_HOST_DIR)
 	@cp $(WEB_HOST_SOURCES) $(WEB_HOST_DIR)/
 	@cp $(COMBINED_ATLAS) $(WEB_HOST_DIR)/combined_tileset.png
-	@cp $(WASM_TARGET) $(WEB_HOST_DIR)/
+	@echo "Copying WASM with embedded DWARF debug info..."
+	@cp $(WASM_TARGET) $(WEB_HOST_DIR)/game.wasm
+	@echo "Copying source files for debugging..."
+	@mkdir -p $(WEB_HOST_DIR)/src
+	@cp -r src/game $(WEB_HOST_DIR)/src/
+	@echo ""
 	@echo "Web build complete. Serve $(WEB_HOST_DIR)/ with a web server."
+	@echo "For Chrome debugging: Install 'C/C++ DevTools Support (DWARF)' extension"
+	@echo "  https://chromewebstore.google.com/detail/pdcpmagijalfljmkmjngeonclgbbannb"
 
 serve: wasm
 	python3 -m http.server 8000 --directory "$(WEB_HOST_DIR)"

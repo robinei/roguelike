@@ -1,6 +1,6 @@
 #include "bbuf.h"
 #include "../common.h" // IWYU pragma: keep
-#include "prnf.h"
+#include "print.h"
 
 // Define this to enable debug label validation
 #define BBUF_DEBUG_LABELS
@@ -36,11 +36,15 @@ static void unpack_label(ByteBuffer *buf, const char *expected_label) {
   // Read label string
   char actual_label[256];
   if (buf->read_pos + len > buf->size) {
-    char msg[512];
-    snprnf(msg, sizeof(msg),
-           "Label read overflow: read_pos=%u, len=%u, size=%u, expected='%s'",
-           buf->read_pos - 1, len, buf->size, expected_label);
-    host_log(LOG_ERROR, msg);
+    PRINT(msg, 512, "Label read overflow: read_pos=");
+    print_int(&msg, buf->read_pos - 1);
+    print_str(&msg, ", len=");
+    print_int(&msg, len);
+    print_str(&msg, ", size=");
+    print_int(&msg, buf->size);
+    print_str(&msg, ", expected=");
+    print_str(&msg, expected_label);
+    host_log(LOG_ERROR, msg.data);
   }
   assert(buf->read_pos + len <= buf->size);
   memcpy(actual_label, buf->data + buf->read_pos, len);
@@ -49,11 +53,12 @@ static void unpack_label(ByteBuffer *buf, const char *expected_label) {
 
   // Validate
   if (strcmp(actual_label, expected_label) != 0) {
-    char msg[512];
-    snprnf(msg, sizeof(msg),
-           "ByteBuffer label mismatch! Expected '%s', got '%s'", expected_label,
-           actual_label);
-    host_log(LOG_ERROR, msg);
+    PRINT(msg, 512, "ByteBuffer label mismatch! Expected '");
+    print_str(&msg, expected_label);
+    print_str(&msg, "', got '");
+    print_str(&msg, actual_label);
+    print_str(&msg, "'");
+    host_log(LOG_ERROR, msg.data);
     assert(0 && "ByteBuffer label mismatch");
   }
 }

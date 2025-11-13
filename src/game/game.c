@@ -11,16 +11,19 @@
 #include "random.h"
 #include "render_api.h"
 #include "turn_queue.h"
-#include "utils/prnf.h"
+#include "utils/print.h"
 #include "world.h"
+#include <stdint.h>
 
 #ifdef __wasm__
 
 extern unsigned char __heap_base;
 extern unsigned char __data_end;
-extern unsigned char __stack_pointer;
+// extern unsigned char __stack_pointer;
 
 unsigned char *get_heap_base(void) { return &__heap_base; }
+unsigned char *get_data_end(void) { return &__data_end; }
+// unsigned char *get_stack_pointer(void) { return &__stack_pointer; }
 
 #else
 
@@ -67,16 +70,25 @@ GAME_CHUNK_LOADED_SIG(GAME_CHUNK_LOADED_NAME) {
 
   if (data_size > 0 && data != NULL) {
     // Chunk found in storage, deserialize it
-    output_message("Loaded chunk (%d, %d) from storage", world_chunk_x,
-                   world_chunk_y);
+    PRINT(msg, 256, "Loaded chunk (");
+    print_int(&msg, world_chunk_x);
+    print_str(&msg, ", ");
+    print_int(&msg, world_chunk_y);
+    print_str(&msg, ") from storage");
+    output_message(msg.data);
+
     deserialize_chunk(chunk_x, chunk_y, data, data_size);
     WORLD.worldmap.chunks[world_chunk_idx].state = CHUNK_LOADED;
   } else {
     // Chunk not found in storage, generate it fresh
     // generate_chunk will mark as CHUNK_LOADED and log message
-    output_message("Failed to load chunk (%d, %d) from storage; falling back "
-                   "to generation",
-                   world_chunk_x, world_chunk_y);
+    PRINT(msg, 256, "Failed to load chunk (");
+    print_int(&msg, world_chunk_x);
+    print_str(&msg, ", ");
+    print_int(&msg, world_chunk_y);
+    print_str(&msg, ") from storage; falling back to generation");
+    output_message(msg.data);
+
     WORLD.worldmap.chunks[world_chunk_idx].state = CHUNK_UNLOADED;
     generate_chunk(chunk_x, chunk_y);
   }
@@ -156,6 +168,13 @@ static EntityIndex spawn_monster(void) {
 GAME_INIT_SIG(GAME_INIT_NAME) {
   WORLD.rng_state = rng_seed;
 
+  // Initialize arena allocator
+  WORLD.arena = (Arena){
+      .buffer = WORLD.arena_buffer,
+      .capacity = sizeof(WORLD.arena_buffer),
+      .offset = 0,
+  };
+
   // entity at index 0 should not be used (index 0 means "no entity")
   entity_alloc();
 
@@ -169,6 +188,9 @@ GAME_INIT_SIG(GAME_INIT_NAME) {
   // Generate map before spawning entities
   WORLD.map.width = MAP_WIDTH_MAX;
   WORLD.map.height = MAP_HEIGHT_MAX;
+
+  // Initialize worldmap (ensure it's zeroed)
+  memset(&WORLD.worldmap, 0, sizeof(WorldMap));
   WORLD.worldmap.curr_chunk_x = MAP_CHUNK_TOTAL_X / 2;
   WORLD.worldmap.curr_chunk_y = MAP_CHUNK_TOTAL_Y / 2;
 
@@ -250,6 +272,8 @@ static void process_npc_turn(EntityIndex entity) {
 }
 
 GAME_FRAME_SIG(GAME_FRAME_NAME) {
+  assert(WORLD.arena.offset == 0);
+
   // FPS calculation (update every second)
   WORLD.frame_time_accumulator += dt;
   WORLD.frame_count++;
@@ -427,6 +451,8 @@ static uint8_t calc_corner_light(Map *map, int tile_x, int tile_y, int corner_x,
 }
 
 GAME_RENDER_SIG(GAME_RENDER_NAME) {
+  assert(WORLD.arena.offset == 0);
+
   RenderContext ctx = {
       .viewport_width_px = viewport_width_px,
       .viewport_height_px = viewport_height_px,
@@ -674,9 +700,10 @@ GAME_RENDER_SIG(GAME_RENDER_NAME) {
 
           // Draw water debug value
           if (WORLD.debug_show_light_values) {
+            PRINT(text, 16, "");
+            print_uint(&text, water_depth);
             geobuilder_text(&geom, screen_x + 1, screen_y + 1, 0.33f,
-                            TEXT_ALIGN_LEFT, (Color){0, 0, 0, 0}, "%d",
-                            water_depth);
+                            TEXT_ALIGN_LEFT, (Color){0, 0, 0, 0}, text.data);
           }
         }
 
@@ -721,9 +748,10 @@ GAME_RENDER_SIG(GAME_RENDER_NAME) {
 
             // Draw debug info if enabled
             if (WORLD.debug_show_light_values) {
+              PRINT(text, 16, "");
+              print_uint(&text, tile_light);
               geobuilder_text(&geom, screen_x + 1, screen_y + 1, 0.33f,
-                              TEXT_ALIGN_LEFT, (Color){0, 0, 0, 0}, "%d",
-                              tile_light);
+                              TEXT_ALIGN_LEFT, (Color){0, 0, 0, 0}, text.data);
             }
           } else {
             // Tile is visible but outside torch radius - uniform darkness
@@ -759,14 +787,17 @@ GAME_RENDER_SIG(GAME_RENDER_NAME) {
     // Position from bottom up
     int y = viewport_height_px - (messages_to_show - i) * tile_size;
 
-    geobuilder_text(&geom, 0, y, 1.0f, TEXT_ALIGN_LEFT, (Color){.a = 192}, "%s",
+    geobuilder_text(&geom, 0, y, 1.0f, TEXT_ALIGN_LEFT, (Color){.a = 192},
                     text);
   }
 
   // Draw FPS in upper right corner
   if (WORLD.fps > 0.0f) {
+    PRINT(text, 16, "");
+    print_uint(&text, (uint64_t)WORLD.fps);
+    print_str(&text, " FPS");
     geobuilder_text(&geom, viewport_width_px, 0, 1.0f, TEXT_ALIGN_RIGHT,
-                    (Color){.a = 192}, "%.1f FPS", (double)WORLD.fps);
+                    (Color){.a = 192}, text.data);
   }
 
   // Flush any remaining vertices

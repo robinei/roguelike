@@ -1,6 +1,4 @@
 #include "render_api.h"
-#include "utils/prnf.h"
-#include <stdarg.h>
 
 // Tile atlas constants
 #define TILE_SIZE 12
@@ -168,13 +166,7 @@ void geobuilder_rect_colored(GeometryBuilder *geom, int x, int y, int w, int h,
 }
 
 void geobuilder_text(GeometryBuilder *geom, int x, int y, float scale,
-                     TextAlign align, Color bg_color, const char *fmt, ...) {
-  char text[256];
-  va_list args;
-  va_start(args, fmt);
-  vsnprnf(text, sizeof(text), fmt, args);
-  va_end(args);
-
+                     TextAlign align, Color bg_color, const char *text) {
   RenderContext *ctx = geom->ctx;
   int char_size = (int)(ctx->tile_size * scale);
 
